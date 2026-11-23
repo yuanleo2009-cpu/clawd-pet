@@ -8,7 +8,7 @@
 
 > 非官方的粉絲作品，與 Anthropic 無關，也未獲其認可。程式碼以 [MIT 授權](LICENSE) 釋出；**授權只涵蓋程式碼**，Clawd 形象與 Claude 商標歸 Anthropic 所有，不在授權範圍內。僅供個人非商業使用。
 >
-> 介面目前只有繁體中文（安裝精靈支援繁中、簡中、英文）。
+> 介面目前只有繁體中文（安裝精靈支援繁中、簡中、英文）。每一版改了什麼見 [更新紀錄](CHANGELOG.md)。
 
 ---
 
@@ -113,12 +113,17 @@ py -3.13 -m venv .venv
 ## 發布新版本
 
 1. 改 `services/version.py` 的 `__version__`（安裝包和選單裡的版本都從這裡來）。
-2. commit 後推一個同名的 tag，例如：
+2. 在 [`CHANGELOG.md`](CHANGELOG.md) 最上面新增這一版的段落（`## [版本] - 日期`），寫清楚新功能、改進、修正。
+   沒寫的話，自動打包會在一開始就失敗。可以先自己檢查：
    ```powershell
-   git tag v1.1.0
-   git push origin main v1.1.0
+   .\.venv\Scripts\python.exe tools\release_notes.py 1.2.0 --check
    ```
-3. GitHub Actions（`.github/workflows/release.yml`）會在 Windows 機器上跑測試、打包，並建立 Release，附上安裝檔與 SHA-256。
+3. commit 後推一個同名的 tag，例如：
+   ```powershell
+   git tag v1.2.0
+   git push origin main v1.2.0
+   ```
+4. GitHub Actions（`.github/workflows/release.yml`）會在 Windows 機器上跑測試、打包，並建立 Release。Release 說明會自動放上 CHANGELOG 裡這一版的更新內容、安裝說明、SHA-256 與打包紀錄連結。
 
 ## 檔案結構
 
@@ -139,6 +144,7 @@ services/
 tools/
   make_sprites.py       用程式畫出所有動作的素材
   make_demo_gif.py      產生 docs/demo.gif（離屏繪製）
+  release_notes.py      從 CHANGELOG.md 取出某一版的更新內容，組成 Release 說明
 tests/                  單元測試（動畫、設定檔）
 installer/              Inno Setup 安裝腳本與中文語系檔
 assets/                 素材、圖示、預設台詞

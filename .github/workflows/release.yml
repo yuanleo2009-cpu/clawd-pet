@@ -1,4 +1,5 @@
 # 推送 v* tag 時：在 GitHub 的 Windows 機器上跑測試、打包，並建立 Release（附安裝檔與 SHA-256）。
+# Release 說明的「更新內容」取自 CHANGELOG.md；沒寫這一版的話會在打包前就失敗。
 # 安裝檔是從公開的 commit 打包出來的，過程記錄在 Actions 頁面，任何人都能檢查。
 # 也可以在 Actions 頁面手動執行（workflow_dispatch）：只打包、上傳成 artifact，不建立 Release。
 name: release
@@ -32,11 +33,15 @@ jobs:
       - name: Unit tests
         run: .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-      - name: Check tag matches services/version.py
+      - name: Check tag matches services/version.py and CHANGELOG.md
         if: startsWith(github.ref, 'refs/tags/')
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           $v = (.\.venv\Scripts\python.exe -c "from services.version import __version__; print(__version__)").Trim()
           if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "tag $env:GITHUB_REF_NAME does not match version v$v" }
+          .\.venv\Scripts\python.exe tools\release_notes.py $v --check
+          if ($LASTEXITCODE -ne 0) { throw "CHANGELOG.md has no section for $v" }
 
       - name: Build
         run: .\build.ps1
@@ -53,21 +58,13 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
+          PYTHONIOENCODING: utf-8
         run: |
+          # Release 說明 = CHANGELOG.md 裡這一版的「更新內容」+ 安裝說明 + SHA-256 + 打包紀錄連結
           $setup = Get-Item dist\ClawdPet-Setup-*.exe
-          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash
           $run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
-          $notes = @"
-          下載 **$($setup.Name)**，雙擊安裝即可（Windows 10/11，64 位元，不需要系統管理員權限）。
-
-          安裝檔沒有數位簽章，Windows 可能顯示「Windows 已保護你的電腦」：點「其他資訊」→「仍要執行」。
-
-          **SHA-256**：``$hash``
-          （PowerShell 驗證：``Get-FileHash .\$($setup.Name) -Algorithm SHA256``）
-
-          此安裝檔由 GitHub Actions 從這個 tag 的原始碼自動打包：$run
-
-          > 非官方的粉絲作品，與 Anthropic 無關。程式碼為 MIT 授權；Clawd 形象與 Claude 商標歸 Anthropic 所有，不在授權範圍內。
-          "@
+          .\.venv\Scripts\python.exe tools\release_notes.py $env:GITHUB_REF_NAME `
+            --setup $setup.FullName --run-url $run --repo $env:GITHUB_REPOSITORY --out release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw "failed to build release notes" }
           gh release create $env:GITHUB_REF_NAME $setup.FullName "$($setup.FullName).sha256" `
-            --title "Clawd 桌寵 $env:GITHUB_REF_NAME" --notes $notes --generate-notes
+            --title "Clawd 桌寵 $env:GITHUB_REF_NAME" --notes-file release-notes.md
