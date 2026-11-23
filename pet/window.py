@@ -152,11 +152,21 @@ class PetWindow(QWidget):
         self._sprite_w, self._sprite_h = lw, lh
         self._unit = u = lw / BASE_W
         self.fx.clear()
-        win_w = math.ceil(lw * 2.1)  # 兩側留空間給落地灰塵（透明處滑鼠會穿透，不影響操作）
-        win_h = math.ceil(lh + 8 * u)
+        # 視窗大小：Clawd 以身體中心旋轉時，轉到任何角度都要完整放得下（含被拎起時的長手長腳、
+        # 擠壓伸長、轉一圈時跳起來的高度）；兩側再多留空間給落地灰塵。
+        # 多出來的地方都是透明的，滑鼠會直接穿透，不影響操作底下的視窗。
+        b0, bl = self.sprites.bounds["idle"], self.sprites.bounds["lifted"]
+        radius = 1.12 * max(math.hypot(b.width() * lw, b.height() * lh) for b in (b0, bl)) / 2
+        above = b0.center().y() * lh            # 身體中心到素材頂端
+        below = lh - above                       # 身體中心到素材底端
+        spin_jump = 14 * u                       # 「轉一圈」跳起來的最高高度
+        top_margin = max(2 * u, radius + spin_jump - above + u)
+        bottom_margin = max(6 * u, radius - below + 2 * u)
+        win_w = math.ceil(max(lw * 2.1, 2 * radius + 4 * u))
+        win_h = math.ceil(top_margin + lh + bottom_margin)
         self.setFixedSize(win_w, win_h)
         self._center_x = win_w / 2
-        self._baseline = win_h - 6 * u
+        self._baseline = win_h - bottom_margin
         if anchor is not None:
             self.move(anchor - self._feet_offset())
             self._keep_on_screen()
@@ -394,6 +404,13 @@ class PetWindow(QWidget):
             pivot = self.sprites.bounds["idle"].top() * sh
             y = snap(self._baseline - sh + pivot + pose.dy * u)
             rect = QRectF(-sw / 2, -pivot, sw, sh)
+        elif pose.pivot_center:
+            # 被丟出去 / 轉一圈：以身體中心為軸原地旋轉，轉到哪個角度都不會甩出視窗
+            c = self.sprites.bounds["idle"].center()
+            cx, cy = c.x() * sw, c.y() * sh
+            x = snap(self._center_x - sw / 2 + cx + pose.dx * u)
+            y = snap(self._baseline - sh + cy + pose.dy * u)
+            rect = QRectF(-cx, -cy, sw, sh)
         else:
             y = snap(self._baseline + pose.dy * u)
             rect = QRectF(-sw / 2, -sh, sw, sh)

@@ -35,6 +35,7 @@ class Pose:
     sy: float = 1.0           # 垂直縮放
     rot: float = 0.0          # 旋轉角度
     anchor_top: bool = False  # True = 以頭頂為支點（被拎起來時）
+    pivot_center: bool = False  # True = 以身體中心為軸，原地旋轉（被丟出去、轉一圈時）
 
 
 def _now(now: float | None) -> float:
@@ -193,6 +194,7 @@ class Animator:
             pose.sy = 1.08
             pose.sx = 0.94 * self._facing_value(now)
             pose.rot = self._fall_rot
+            pose.pivot_center = True
             return pose
 
         if (not self.sleeping and self._action is None and now >= self._talk_until
@@ -362,6 +364,7 @@ class Animator:
                 q = (a - 0.1) / 0.7
                 pose.dy += -14 * 4 * q * (1 - q)
                 pose.rot += 360 * _ease(q)
+                pose.pivot_center = True         # 在空中原地翻，不是繞著腳轉
                 return "happy"
             self._emit_once("jump_land")
             r = (a - 0.8) / 0.2
