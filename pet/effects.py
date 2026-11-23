@@ -15,6 +15,39 @@ from PySide6.QtGui import QColor, QPainter, QPen
 DUST_COLORS = [QColor(240, 231, 220), QColor(222, 208, 194), QColor(250, 245, 238)]
 SPARK_COLOR = QColor(255, 226, 150)
 LINE_COLOR = QColor(255, 255, 255)
+HEART_COLOR = QColor(255, 107, 139)
+NOTE_COLORS = [QColor(127, 209, 255), QColor(255, 211, 110), QColor(180, 155, 255), QColor(140, 230, 170)]
+STAR_COLOR = QColor(255, 222, 89)
+
+# 像素小圖案（X = 有顏色）
+HEART = [".X.X.", "XXXXX", "XXXXX", ".XXX.", "..X.."]
+NOTE = ["..XXX", "..X.X", "..X..", "XXX..", "XXX.."]
+STAR = [".X.", "XXX", ".X."]
+
+
+def paint_pattern(p: QPainter, pattern: list[str], cx: float, cy: float, px: float, color: QColor) -> None:
+    """以 (cx, cy) 為中心畫像素小圖案，每格 px 大小。"""
+    h, w = len(pattern), len(pattern[0])
+    x0, y0 = cx - w * px / 2, cy - h * px / 2
+    for r, row in enumerate(pattern):
+        for c, ch in enumerate(row):
+            if ch == "X":
+                p.fillRect(QRectF(x0 + c * px, y0 + r * px, px + 0.3, px + 0.3), color)
+
+
+def paint_dizzy_stars(p: QPainter, cx: float, cy: float, radius: float, unit: float, t: float,
+                      alpha: float = 1.0) -> None:
+    """暈頭轉向：三顆星星繞著頭頂轉（扁橢圓軌道，後面那顆小一點、淡一點）。"""
+    p.save()
+    p.setPen(Qt.PenStyle.NoPen)
+    for i in range(3):
+        ang = t * 4.2 + i * 2 * math.pi / 3
+        depth = (math.sin(ang) + 1) / 2          # 0 = 後面，1 = 前面
+        c = QColor(STAR_COLOR)
+        c.setAlphaF(alpha * (0.45 + 0.55 * depth))
+        paint_pattern(p, STAR, cx + math.cos(ang) * radius, cy + math.sin(ang) * radius * 0.28,
+                      unit * (0.85 + 0.4 * depth), c)
+    p.restore()
 
 
 @dataclass
@@ -104,6 +137,23 @@ class Effects:
                         x + side * 0.5 * width, y - unit, -up,
                         random.uniform(3.5, 5.5) * unit * s, 0.24))
 
+    def heart(self, x: float, y: float, unit: float) -> None:
+        """被摸摸：頭上冒出一顆愛心，晃著往上飄。"""
+        self._unit = unit
+        self.particles.append(Particle(
+            "heart", x + random.uniform(-6, 6) * unit, y,
+            random.uniform(-3, 3) * unit, -random.uniform(10, 15) * unit,
+            random.uniform(1.0, 1.3), unit * random.uniform(0.95, 1.15), HEART_COLOR))
+
+    def note(self, x: float, y: float, unit: float) -> None:
+        """跳舞：飄出一個彩色音符。"""
+        self._unit = unit
+        side = random.choice((-1, 1))
+        self.particles.append(Particle(
+            "note", x + side * random.uniform(6, 10) * unit, y,
+            side * random.uniform(3, 7) * unit, -random.uniform(9, 14) * unit,
+            random.uniform(1.2, 1.5), unit * 0.95, random.choice(NOTE_COLORS)))
+
     def puff(self, x: float, y: float, unit: float, width: float) -> None:
         """小跳一下落地：腳邊冒一點點灰。"""
         self._unit = unit
@@ -134,6 +184,9 @@ class Effects:
                 drag = math.exp(-3.2 * dt)      # 灰塵很快就慢下來、往上飄散
                 p.vx *= drag
                 p.vy = p.vy * drag - 2 * u * dt
+            elif p.kind in ("heart", "note"):   # 輕飄飄往上、左右晃
+                p.vx = p.vx * math.exp(-1.5 * dt) + math.sin(p.age * 6) * 8 * u * dt
+                p.vy *= math.exp(-0.8 * dt)
             else:
                 p.vy += 60 * u * dt             # 火花會掉回來
             p.x += p.vx * dt
@@ -164,6 +217,11 @@ class Effects:
         for q in self.particles:
             k = q.age / q.life
             c = QColor(q.color)
+            if q.kind in ("heart", "note"):
+                pop = min(1.0, q.age / 0.15)                 # 一開始「啵」地放大出現
+                c.setAlphaF(1.0 if k < 0.6 else (1 - k) / 0.4)
+                paint_pattern(p, HEART if q.kind == "heart" else NOTE, q.x, q.y, q.size * (0.5 + 0.5 * pop), c)
+                continue
             if q.kind == "dust":
                 c.setAlphaF(0.95 * (1 - k) ** 1.2)
                 size = q.size * (1 + 0.7 * k)    # 灰塵越散越大

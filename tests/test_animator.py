@@ -60,6 +60,71 @@ class AnimatorTests(unittest.TestCase):
         self.assertFalse(a.falling)
         self.assertEqual(a.action, "land")
 
+    def test_walk_alternates_legs_and_faces_direction(self):
+        a = Animator(now=0.0)
+        a.walk(-1, 1.0)
+        sprites = {a.update(1.0 + i / 60).sprite for i in range(60)}
+        self.assertEqual(sprites, {"walk_a", "walk_b"})
+        self.assertEqual(a.facing, -1.0)
+        a.play("jump", 3.0)               # 做動作會停下腳步
+        self.assertEqual(a.walking, 0)
+
+    def test_walking_does_not_keep_clawd_awake(self):
+        a = Animator(now=0.0)
+        a.walk(1, 10.0)
+        run(a, 10, SLEEP_AFTER + 5, step=0.5)
+        self.assertTrue(a.sleeping)
+        self.assertEqual(a.walking, 0)
+
+    def test_idle_tricks_do_not_reset_sleep_timer(self):
+        a = Animator(now=0.0)
+        a.play("dance", SLEEP_AFTER - 10, interaction=False)
+        run(a, SLEEP_AFTER - 10, SLEEP_AFTER + 2, step=0.25)
+        self.assertTrue(a.sleeping)
+
+    def test_dance_emits_notes_and_pet_emits_hearts(self):
+        a = Animator(now=0.0)
+        a.play("dance", 0.0)
+        events = []
+        for i in range(int(ACTIONS["dance"] * 60)):
+            a.update(i / 60)
+            events += a.pop_events()
+        self.assertGreaterEqual(events.count("note"), 4)
+        a.play("pet", 100.0)
+        events = []
+        for i in range(int(ACTIONS["pet"] * 60)):
+            a.update(100.0 + i / 60)
+            events += a.pop_events()
+        self.assertGreaterEqual(events.count("heart"), 3)
+
+    def test_spin_does_a_full_turn_and_lands(self):
+        a = Animator(now=0.0)
+        a.play("spin", 0.0)
+        mid = a.update(0.45)
+        self.assertGreater(abs(mid.rot), 90)          # 半空中轉了一大圈
+        self.assertLess(mid.dy, -5)
+        events = []
+        for i in range(70):
+            a.update(0.45 + i / 60)
+            events += a.pop_events()
+        self.assertIn("jump_land", events)
+        self.assertIsNone(a.action)
+
+    def test_dizzy_shows_x_eyes(self):
+        a = Animator(now=0.0)
+        a.play("dizzy", 0.0)
+        self.assertEqual(a.update(0.5).sprite, "dizzy")
+
+    def test_thrown_spin_resets_on_landing(self):
+        a = Animator(now=0.0)
+        a.end_drag(fall=True, now=0.0)
+        a.fall_spin = 600
+        pose = run(a, 0.0, 0.5)
+        self.assertNotEqual(pose.rot, 0)
+        a.land(0.6, strength=1.0)
+        self.assertEqual(a.fall_spin, 0)
+        self.assertEqual(a.update(1.5).rot, 0)
+
     def test_talk_alternates_mouth_frames(self):
         a = Animator(now=0.0)
         a.talk(1.0, 5.0)

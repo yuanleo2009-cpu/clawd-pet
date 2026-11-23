@@ -89,8 +89,10 @@ def body(c: Canvas):
 
 
 def legs(c: Canvas, length=2):
-    for x in LEGS_X:
-        c.rect(x, BODY_Y + BODY_H, 1, length, BODY)
+    """length 可以是一個數字，或四隻腳各自的長度（走路時腳會一長一短交替）。"""
+    lengths = length if isinstance(length, tuple) else (length,) * len(LEGS_X)
+    for x, n in zip(LEGS_X, lengths):
+        c.rect(x, BODY_Y + BODY_H, 1, n, BODY)
 
 
 def arms(c: Canvas, style="normal"):
@@ -128,6 +130,11 @@ def eyes(c: Canvas, style="open"):
         for dx, dy in ((0, 0), (1, 1), (2, 2), (1, 3), (0, 4)):
             c.sub(lx + dx, y + dy, EYE)
             c.sub(W - 1 - (lx + dx), y + dy, EYE)
+    elif style == "dizzy":         # X X（3 x 3 子像素）：被搖暈了
+        lx, y = EYE_L * SUB, EYE_Y * SUB + 1
+        for dx, dy in ((0, 0), (2, 0), (1, 1), (0, 2), (2, 2)):
+            c.sub(lx + dx, y + dy, EYE)
+            c.sub(W - 1 - (lx + dx), y + dy, EYE)
 
 
 def bulb(c: Canvas):
@@ -161,6 +168,10 @@ FRAMES = {
     "lifted": lambda: frame(arm="up", leg=3),
     "sleep":  lambda: frame(arm="low", eye="sleep"),
     "idea":   lambda: frame(arm=("normal", "up"), extra=bulb),
+    # 橫著走：兩組腳一長一短交替，手也一高一低
+    "walk_a": lambda: frame(arm=("normal", "wave"), leg=(2, 1, 2, 1)),
+    "walk_b": lambda: frame(arm=("wave", "normal"), leg=(1, 2, 1, 2)),
+    "dizzy":  lambda: frame(arm="low", eye="dizzy"),
 }
 
 

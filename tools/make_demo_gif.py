@@ -29,11 +29,11 @@ Settings.load = classmethod(lambda cls: cls(Path(os.devnull), {}))
 Settings.save = lambda self: None
 
 from pet.animator import Animator  # noqa: E402
-from pet.window import PetWindow  # noqa: E402
+from pet.window import Flight, PetWindow  # noqa: E402
 
 OUT = ROOT / "docs" / "demo.gif"
-FPS = 30
-W, H = 420, 300
+FPS = 25
+W, H = 460, 300
 TASKBAR = 34
 FLOOR = H - TASKBAR
 
@@ -65,77 +65,94 @@ def main():
         if (fonts / name).exists():
             QFontDatabase.addApplicationFont(str(fonts / name))
     w = PetWindow()
-    w._tick.stop()
-    w._chatter.stop()
+    for timer in (w._tick, w._chatter, w._idle):
+        timer.stop()
     w.tray.hide()
     w.anim = anim = Animator(now=0.0)
-    anim._next_look = 99  # 張望留到後面手動觸發
+    anim._next_look = 99  # 不要自己亂張望
     bg = background()
     feet = w._feet_offset()
+    u = w._unit
 
     frames: list[Image.Image] = []
     lift = 0.0          # 被拎起的高度
+    shift = -60.0       # 水平位置（相對畫面中央）
     fall_v = 0.0
     bubble_img: QImage | None = None
+    bubble_until = 0.0
 
-    # 時間軸（秒）
+    def say(text: str, t: float, seconds: float):
+        nonlocal bubble_img, bubble_until
+        w.bubble.say(text, QPoint(0, 0), 10_000)
+        bubble_img = w.bubble.grab().toImage()
+        bubble_until = t + seconds
+
+    # 時間軸（秒）：打招呼 → 橫著走 → 被摸摸 → 被拎起來猛搖 → 摔下來暈 → 跳舞
     script = [
-        (0.0, lambda t: None),
-        (1.0, lambda t: anim.play("jump", t)),
-        (2.0, "say"),
-        (3.9, lambda t: anim.start_drag(t)),
-        (5.1, "drop"),
-        (6.5, lambda t: anim.play("idea", t)),
+        (0.5, lambda t: (anim.play("wave", t), say("嗨！今天也一起寫程式吧", t, 1.8))),
+        (2.6, lambda t: anim.walk(1, t)),
+        (4.3, lambda t: anim.stop_walk()),
+        (4.6, lambda t: anim.play("pet", t)),
+        (6.3, lambda t: anim.start_drag(t)),
+        (7.5, "drop"),
+        (10.9, lambda t: anim.play("dance", t)),
     ]
-    total = 8.2
+    total = 14.8
     events = list(script)
     falling = False
 
     for i in range(int(total * FPS)):
         t = i / FPS
+        dt = 1 / FPS
+        w._now = t
         while events and events[0][0] <= t:
             _, ev = events.pop(0)
-            if ev == "say":
-                w.bubble.say("嗨！今天也一起寫程式吧", QPoint(0, 0), 10_000)
-                bubble_img = w.bubble.grab().toImage()
-                anim.talk(1.7, t)
-            elif ev == "drop":
+            if ev == "drop":
                 anim.end_drag(fall=True, now=t)
                 falling = True
             else:
                 ev(t)
-        if bubble_img is not None and t > 3.7:
+        if bubble_img is not None and t > bubble_until:
             bubble_img = None
 
-        # 拖曳：往上提、左右甩；放開後受重力掉回工作列
-        if anim.dragging:
-            lift = min(110.0, lift + 300 / FPS)
-            anim.drag_velocity(900 if int(t * 2.5) % 2 == 0 else -900)
-        elif falling:
-            fall_v += 4200 / FPS
-            lift -= fall_v / FPS
-            w._fall = (0, fall_v, 0.0)  # 讓視窗畫出速度線
+        if anim.walking:
+            shift += anim.walking * 11 * u * dt
+        if anim.dragging:  # 拎起來、左右猛搖
+            lift = min(110.0, lift + 300 * dt)
+            v = 1600 if int(t * 5) % 2 == 0 else -1600
+            shift += v * dt * 0.06
+            anim.drag_velocity(v)
+        elif falling:      # 放開：受重力掉回工作列
+            fall_v += 4200 * dt
+            lift -= fall_v * dt
+            w._fall = Flight(0, 0, 0, fall_v)   # 讓視窗畫出速度線
             if lift <= 0:
                 lift, fall_v, falling = 0.0, 0.0, False
                 w._fall = None
-                anim.land(t, strength=1.3)   # 示範用：當成從高處摔下來
+                anim.land(t, strength=1.3)       # 示範用：當成從高處摔下來
                 w._spawn_landing(1.3)
+                events.insert(0, (t + 0.45, lambda t: (anim.play("dizzy", t), say("頭好暈…", t, 1.6))))
 
         w.pose = anim.update(t)
+        head = w._head_y()
         for ev in anim.pop_events():
             if ev == "jump_land":
                 w._spawn_puff()
-        w.fx.step(1 / FPS)
+            elif ev == "heart":
+                w.fx.heart(w._center_x, head - 2 * u, u)
+            elif ev == "note":
+                w.fx.note(w._center_x, head, u)
+        w.fx.step(dt)
         pet = w.grab().toImage()
 
         frame = QImage(bg)
         p = QPainter(frame)
-        x = W // 2 - feet.x()
+        x = round(W / 2 + shift) - feet.x()
         y = round(FLOOR - feet.y() - lift)
         p.drawImage(x, y, pet)
         if bubble_img is not None:
-            head = w._head_y()
-            p.drawImage(W // 2 - bubble_img.width() // 2, round(y + head - bubble_img.height()), bubble_img)
+            p.drawImage(round(W / 2 + shift) - bubble_img.width() // 2,
+                        round(y + head - 2 * u - bubble_img.height()), bubble_img)
         p.end()
         frames.append(to_pil(frame))
 

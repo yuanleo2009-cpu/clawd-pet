@@ -9,7 +9,8 @@ from PySide6.QtGui import QColor, QImage, QPixmap
 from services import paths
 
 BASE_W = 40  # 內建素材的原始寬度；大小檔位與動畫幅度都以它為基準
-FRAMES = ("idle", "blink", "look", "talk", "happy", "lifted", "sleep", "idea")
+FRAMES = ("idle", "blink", "look", "talk", "happy", "lifted", "sleep", "idea",
+          "walk_a", "walk_b", "dizzy")
 
 _FAST = Qt.TransformationMode.FastTransformation
 _SMOOTH = Qt.TransformationMode.SmoothTransformation

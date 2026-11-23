@@ -7,8 +7,10 @@ import random
 import time
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, QUrl
-from PySide6.QtGui import (QActionGroup, QColor, QDesktopServices, QFont, QGuiApplication, QIcon,
-                           QPainter, QPen)
+from dataclasses import dataclass
+
+from PySide6.QtGui import (QActionGroup, QColor, QCursor, QDesktopServices, QFont, QGuiApplication,
+                           QIcon, QPainter, QPen)
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon, QWidget
 
 from services import autostart, launcher, paths
@@ -16,13 +18,28 @@ from services.settings import Settings
 from services.version import __version__
 from .animator import Animator
 from .bubble import Bubble
-from .effects import Effects
+from .effects import Effects, paint_dizzy_stars
 from .phrases import Phrases
 from .sprites import BASE_W, SpriteSet
 
 SIZE_PRESETS = [("小", 3), ("中", 4), ("大", 5), ("特大", 6)]
 WAKE_LINES = ["嗯…？我醒了！", "呼啊～睡得好飽", "有什麼事嗎？"]
 LAUNCH_LINES = ["有點子了！開工囉", "Claude 出動！", "一起把 bug 抓光吧！"]
+
+PET_LINES = ["好舒服～", "嘿嘿 💕", "再摸一下！", "最喜歡你了～"]
+DIZZY_LINES = ["頭好暈…", "天旋地轉～", "不要再搖了啦 @_@"]
+GRAVITY = 4200          # 重力加速度（像素/秒²）
+
+
+@dataclass
+class Flight:
+    """往下掉 / 被丟出去時的狀態（視窗左上角座標，浮點數）。"""
+    x: float
+    y: float
+    vx: float = 0.0
+    vy: float = 0.0
+    bounces: int = 0
+
 
 MENU_QSS = """
 QMenu {
@@ -70,9 +87,28 @@ class PetWindow(QWidget):
         self._last_mouse = (QPoint(), 0.0)
         self._click_timer = QTimer(self, singleShot=True)
         self._click_timer.timeout.connect(self._on_single_click)
-        self._fall: tuple[int, float, float] | None = None  # (目標 y, 目前速度, 目前 y（浮點數）)
-        self._last_tick = time.perf_counter()
+        self._fall: Flight | None = None
+        self._last_tick = self._now = time.perf_counter()
         self._was_sleeping = False
+        self._drag_v = (0.0, 0.0)          # 拖曳時的速度（像素/秒），放開時用來把牠丟出去
+        self._shakes: list[float] = []     # 拖曳時左右急轉的時間點（搖太多會暈）
+        self._shake_dir = 0
+        self._dizzy_pending = False
+        self._hover = (0, 0, 0.0)          # 摸摸偵測：(上次 x, 方向, 累積移動)
+        self._rubs: list[float] = []
+        # 待機小行為：走路、偶爾表演
+        now = time.perf_counter()
+        self._walk_x = 0.0
+        self._walk_until = 0.0
+        self._next_walk = now + random.uniform(8, 15)
+        self._next_trick = now + random.uniform(60, 150)
+        self._next_watch_check = 0.0
+        self._last_night_note = 0.0
+        self._idle = QTimer(self)
+        self._idle.timeout.connect(self._on_idle)
+        self._idle.start(1000)
+        self.setMouseTracking(True)        # 不按鍵也能收到滑鼠移動（摸摸用）
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
 
         # 動畫計時器（幀率可在右鍵 → 畫面 調整）
         self._tick = QTimer(self)
@@ -96,6 +132,7 @@ class PetWindow(QWidget):
         self.windowHandle().screenChanged.connect(lambda _s: (self._rebuild(), self._apply_fps()))
         autostart.refresh()
         self._setup_tray()
+        QTimer.singleShot(1500, self._greet)
 
     # ================= 幾何 =================
     def _rebuild(self, keep_anchor: bool = True, force: bool = False) -> None:
@@ -188,32 +225,74 @@ class PetWindow(QWidget):
             return 0 < dist < self._sprite_h * 1.5  # 離底部不到 1.5 隻 Clawd 高就吸過去
         return False
 
-    def _start_fall(self) -> None:
-        target = self._floor_y() - self._feet_offset().y()
-        if target <= self.y():
+    def _screen_rect(self):
+        feet = self._feet_global()
+        screen = QGuiApplication.screenAt(feet) or self.screen() or QGuiApplication.primaryScreen()
+        return screen.availableGeometry()
+
+    def _start_fall(self, vx: float = 0.0, vy: float = 0.0) -> None:
+        """開始受重力往下掉。vx / vy 是放開時甩動的速度（像素/秒）：用力甩就會被丟出去。"""
+        vx = max(-2600.0, min(vx, 2600.0))
+        vy = max(-2200.0, min(vy, 1500.0))
+        floor = self._floor_y() - self._feet_offset().y()
+        if self.y() >= floor and abs(vx) < 150 and vy >= 0:
             self._fall = None
             self.anim.land()
-            self._save_position()
+            self._after_landing()
             return
-        self._fall = (target, 0.0, float(self.y()))
+        self._fall = Flight(float(self.x()), float(self.y()), vx, vy)
         self.anim.falling = True
+        # 甩得越用力，在空中轉得越快
+        self.anim.fall_spin = max(-900.0, min(vx * 0.4, 900.0)) if abs(vx) > 350 else 0.0
 
     def _step_fall(self, dt: float) -> None:
-        # y 用浮點數累積：每幀從整數座標重算的話，小數被捨去，幀率越高掉得越慢
-        target, v, y = self._fall
-        v += 4200 * dt                     # 重力加速度（像素/秒²）
-        y += v * dt
-        if y >= target:
-            self.move(self.x(), target)
-            self._fall = None
-            # 掉越快摔越重：壓得更扁、灰塵更多（約 0.4 輕放 ～ 1.6 從高處摔下）
-            strength = v / 1400
-            self.anim.land(strength=strength)
-            self._spawn_landing(strength)
-            self._save_position()
-        else:
-            self.move(self.x(), round(y))
-            self._fall = (target, v, y)
+        # 位置用浮點數累積：每幀從整數座標重算的話，小數被捨去，幀率越高掉得越慢
+        f = self._fall
+        f.vy += GRAVITY * dt
+        f.vx *= math.exp(-0.35 * dt)                       # 空氣阻力
+        f.x += f.vx * dt
+        f.y += f.vy * dt
+
+        g = self._screen_rect()
+        fo = self._feet_offset()
+        half = self.sprites.bounds["idle"].width() * self._sprite_w / 2
+        left, right = g.left() + half - fo.x(), g.right() - half - fo.x()
+        if f.x < left or f.x > right:                       # 撞到螢幕左右邊緣：彈回來
+            f.x = left if f.x < left else right
+            f.vx = -f.vx * 0.55
+            self.anim.fall_spin *= -0.6
+        top = g.top() - (self._head_y() - 2 * self._unit)
+        if f.y < top:                                       # 撞到螢幕上緣
+            f.y, f.vy = top, abs(f.vy) * 0.3
+
+        floor = g.bottom() - fo.y()
+        if f.y >= floor:
+            f.y = floor
+            strength = f.vy / 1400       # 掉越快摔越重（約 0.4 輕放 ～ 1.6 從高處摔下）
+            if f.vy > 1150 and f.bounces < 2:               # 摔很重：在地上彈一兩下
+                self._spawn_landing(strength * 0.7)
+                f.vy = -f.vy * 0.32
+                f.vx *= 0.6
+                f.bounces += 1
+                self.anim.fall_spin *= 0.4
+            else:
+                self.move(round(f.x), round(f.y))
+                self._fall = None
+                self.anim.land(strength=strength)
+                self._spawn_landing(strength)
+                self._after_landing()
+                return
+        self.move(round(f.x), round(f.y))
+
+    def _after_landing(self) -> None:
+        self._save_position()
+        if self._dizzy_pending:                             # 被搖暈了：落地後才開始暈
+            self._dizzy_pending = False
+            QTimer.singleShot(450, self._become_dizzy)
+
+    def _become_dizzy(self) -> None:
+        self.anim.play("dizzy")
+        self.say(random.choice(DIZZY_LINES))
 
     # ================= 落地特效 =================
     def _spawn_landing(self, strength: float) -> None:
@@ -230,7 +309,9 @@ class PetWindow(QWidget):
         """往下掉時，頭上拖著幾條速度線。"""
         if self._fall is None or not self.settings["effects"]:
             return
-        u, v = self._unit, self._fall[1]
+        u, v = self._unit, self._fall.vy
+        if v < 300:          # 往上飛或還很慢的時候不畫
+            return
         length = min(14.0, 3 + v / 260) * u
         top = self._head_y() - 2 * u
         c = QColor(255, 255, 255, 150)
@@ -263,14 +344,24 @@ class PetWindow(QWidget):
         self._tick.start(max(1, round(1000 / fps)))
 
     def _on_tick(self) -> None:
-        now = time.perf_counter()
+        now = self._now = time.perf_counter()
         dt, self._last_tick = min(now - self._last_tick, 0.05), now
         if self._fall is not None:
             self._step_fall(dt)
+        if self.anim.walking:
+            self._step_walk(now, dt)
+        elif now >= self._next_watch_check:
+            self._next_watch_check = now + 0.1
+            self._watch_cursor(now)
         self.pose = self.anim.update(now)
+        head = self._head_y()
         for ev in self.anim.pop_events():
             if ev == "jump_land":
                 self._spawn_puff()
+            elif ev == "heart":
+                self.fx.heart(self._center_x, head - 2 * self._unit, self._unit)
+            elif ev == "note" and self.settings["effects"]:
+                self.fx.note(self._center_x, head, self._unit)
         self.fx.step(dt)
         if self.anim.sleeping != self._was_sleeping:  # 睡著 / 醒來 → 切換幀率
             self._was_sleeping = self.anim.sleeping
@@ -319,7 +410,12 @@ class PetWindow(QWidget):
         p.fillRect(hit, QColor(0, 0, 0, 1))
         p.drawPixmap(rect, pm, QRectF(0, 0, pm.width(), pm.height()))
         p.restore()
-        self.fx.paint(p)  # 灰塵畫在 Clawd 前面
+        self.fx.paint(p)  # 灰塵、愛心、音符畫在 Clawd 前面
+
+        if self.anim.action == "dizzy":
+            a = self.anim.action_elapsed(self._now)
+            fade = max(0.0, min(1.0, (2.6 - a) / 0.5))
+            paint_dizzy_stars(p, x, self._head_y() - 1.5 * u, self._sprite_w * 0.3, u, self._now, fade)
 
         if self.anim.sleeping:
             self._paint_zzz(p)
@@ -339,6 +435,85 @@ class PetWindow(QWidget):
             p.setPen(QColor(217, 119, 87, alpha))
             p.drawText(QPointF(base_x + phase * 5 * u, base_y - phase * 10 * u), "z")
 
+    # ================= 待機小行為 =================
+    def _on_floor(self) -> bool:
+        return abs(self._feet_global().y() - self._floor_y()) <= 3
+
+    def _free(self) -> bool:
+        """閒著：沒被拖、沒在掉、沒在做動作、沒睡覺、看得見。"""
+        return (self.isVisible() and not self._pressed and self._fall is None
+                and not self.anim.busy and not self.anim.sleeping)
+
+    def _on_idle(self) -> None:
+        """每秒檢查一次：閒著的時候偶爾走一走，或表演一下。"""
+        now = time.perf_counter()
+        if not self._free() or self.anim.walking or self.bubble.isVisible():
+            return
+        if self.settings["wander"] and self._on_floor() and now >= self._next_walk:
+            self._next_walk = now + random.uniform(12, 30)
+            if random.random() < 0.7:
+                self.start_walk(duration=random.uniform(1.8, 4.5))
+                return
+        if now >= self._next_trick:
+            self._next_trick = now + random.uniform(120, 300)
+            trick = random.choice(["dance", "spin", "wave"])
+            self.anim.play(trick, interaction=False)
+
+    def start_walk(self, direction: int = 0, duration: float = 3.0) -> None:
+        if not self._on_floor() or self._fall is not None:
+            return
+        if direction == 0:  # 往空間比較大的那邊走
+            g = self._screen_rect()
+            cx = self._feet_global().x()
+            direction = 1 if (g.right() - cx) > (cx - g.left()) else -1
+            if random.random() < 0.35:
+                direction = -direction
+        self._walk_x = float(self.x())
+        self._walk_until = time.perf_counter() + duration
+        self.anim.walk(direction)
+
+    def _step_walk(self, now: float, dt: float) -> None:
+        if now >= self._walk_until or not self._free():
+            self.anim.stop_walk()
+            self._save_position()
+            return
+        speed = 11 * self._unit                                  # 慢慢地橫著走
+        self._walk_x += self.anim.walking * speed * dt
+        g = self._screen_rect()
+        fo = self._feet_offset()
+        half = self.sprites.bounds["idle"].width() * self._sprite_w / 2
+        left, right = g.left() + half - fo.x(), g.right() - half - fo.x()
+        if self._walk_x <= left or self._walk_x >= right:        # 走到邊緣就轉身
+            self._walk_x = max(left, min(self._walk_x, right))
+            self.anim.walk(-self.anim.walking, now)
+        self.move(round(self._walk_x), self.y())
+
+    def _watch_cursor(self, now: float) -> None:
+        """滑鼠在附近時轉過去看它（太近、太遠都不理）。"""
+        if not self.settings["follow_cursor"] or not self._free():
+            return
+        c = QCursor.pos()
+        me = self.mapToGlobal(QPoint(round(self._center_x), round(self._head_y() + self._sprite_h * 0.3)))
+        dx, dy = c.x() - me.x(), c.y() - me.y()
+        dist = math.hypot(dx, dy)
+        if self._sprite_w * 0.6 < dist < self._sprite_w * 2.6 and abs(dx) > self._sprite_w * 0.3:
+            self.anim.watch(1 if dx > 0 else -1, now)
+
+    def _greet(self) -> None:
+        hour = time.localtime().tm_hour
+        if 5 <= hour < 11:
+            text = "早安！今天也一起加油 ☀️"
+        elif 11 <= hour < 14:
+            text = "午安～吃飯了嗎？"
+        elif 14 <= hour < 18:
+            text = "下午好！要不要喝杯茶？"
+        elif 18 <= hour < 23:
+            text = "晚上好～今天辛苦了"
+        else:
+            text = "這麼晚還沒睡？我陪你 🌙"
+        self.anim.play("wave")
+        self.say(text)
+
     # ================= 說話 =================
     def say(self, text: str, force: bool = False) -> None:
         if not (force or self.settings["bubbles"]):
@@ -353,7 +528,13 @@ class PetWindow(QWidget):
     def _on_chatter(self) -> None:
         if (self.settings["chatter"] and self.settings["bubbles"]
                 and not self.anim.sleeping and not self.anim.dragging):
-            self.say(self.phrases.random())
+            now = time.perf_counter()
+            hour = time.localtime().tm_hour
+            if hour < 5 and now - self._last_night_note > 3600:   # 深夜：每小時最多提醒一次
+                self._last_night_note = now
+                self.say(f"已經 {hour} 點了，早點睡吧 💤")
+            else:
+                self.say(self.phrases.random())
         self._schedule_chatter()
 
     def hello_again(self) -> None:
@@ -394,17 +575,22 @@ class PetWindow(QWidget):
             if self._fall is not None:  # 掉落中被接住
                 self._fall = None
                 self.anim.falling = False
+            self.anim.stop_walk()
             self._pressed = True
             self._dragging = False
             self._press_global = e.globalPosition().toPoint()
             self._win_start = self.pos()
             self._last_mouse = (self._press_global, time.perf_counter())
+            self._drag_v = (0.0, 0.0)
+            self._shakes.clear()
+            self._shake_dir = 0
         e.accept()
 
     def mouseMoveEvent(self, e):
-        if not self._pressed:
-            return
         g = e.globalPosition().toPoint()
+        if not self._pressed:
+            self._detect_petting(g.x())
+            return
         if not self._dragging:
             if (g - self._press_global).manhattanLength() < 6:
                 return
@@ -412,31 +598,74 @@ class PetWindow(QWidget):
             self._click_timer.stop()
             self.bubble.hide_now()
             self.anim.start_drag()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
         self.move(self._win_start + (g - self._press_global))
         now = time.perf_counter()
         lp, lt = self._last_mouse
-        self.anim.drag_velocity((g.x() - lp.x()) / max(now - lt, 1e-3))
+        dt = max(now - lt, 1e-3)
+        vx, vy = (g.x() - lp.x()) / dt, (g.y() - lp.y()) / dt
+        ovx, ovy = self._drag_v
+        self._drag_v = (ovx * 0.5 + vx * 0.5, ovy * 0.5 + vy * 0.5)   # 平滑：放開時拿來丟
+        self.anim.drag_velocity(vx)
         self._last_mouse = (g, now)
+        # 搖晃偵測：快速左右來回 5 次以上 → 落地後會暈
+        if abs(vx) > 900:
+            d = 1 if vx > 0 else -1
+            if self._shake_dir and d != self._shake_dir:
+                self._shakes = [t for t in self._shakes if now - t < 1.5] + [now]
+                if len(self._shakes) >= 5:
+                    self._dizzy_pending = True
+            self._shake_dir = d
 
     def mouseReleaseEvent(self, e):
         if e.button() != Qt.MouseButton.LeftButton:
             return
         was_pressed, self._pressed = self._pressed, False
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         if self._ignore_release:
             self._ignore_release = False
             return
         if self._dragging:
             self._dragging = False
+            # 放開前停住超過 0.1 秒就不算甩，直接掉下去
+            vx, vy = self._drag_v if time.perf_counter() - self._last_mouse[1] < 0.1 else (0.0, 0.0)
             self._keep_on_screen()
             if self._should_dock():
                 self.anim.end_drag(fall=True)
-                self._start_fall()
+                self._start_fall(vx, vy)
             else:
                 self.anim.end_drag()
-                self._save_position()
+                self._after_landing()
             return
         if was_pressed:
             self._click_timer.start(QApplication.styleHints().mouseDoubleClickInterval())
+
+    def _detect_petting(self, x: int) -> None:
+        """滑鼠在 Clawd 身上來回滑（不按鍵）= 摸摸頭。"""
+        last_x, last_dir, travel = self._hover
+        dx = x - last_x
+        now = time.perf_counter()
+        if abs(dx) < 2:
+            return
+        d = 1 if dx > 0 else -1
+        travel = travel + abs(dx) if last_dir else 0.0                  # 剛移進來的第一下不算
+        if last_dir and d != last_dir and travel > self._unit * 3:   # 換方向 = 摸了一下
+            self._rubs = [t for t in self._rubs if now - t < 1.2] + [now]
+            travel = 0
+            if len(self._rubs) >= 3 and self.anim.action != "pet" and self._fall is None:
+                self._rubs.clear()
+                woke = self.anim.poke()
+                self.anim.play("pet")
+                if woke:
+                    self.say("嗯～被摸醒了 💕")
+                elif random.random() < 0.4:
+                    self.say(random.choice(PET_LINES))
+        self._hover = (x, d, travel)
+
+    def leaveEvent(self, e):
+        self._hover = (0, 0, 0.0)
+        self._rubs.clear()
+        super().leaveEvent(e)
 
     def mouseDoubleClickEvent(self, e):
         if e.button() != Qt.MouseButton.LeftButton:
@@ -451,7 +680,7 @@ class PetWindow(QWidget):
             self.anim.play("squish")
             self.say(random.choice(WAKE_LINES))
             return
-        choices = ["jump", "squish", "shake"]
+        choices = ["jump", "squish", "shake", "spin"]
         if self.settings["bubbles"]:
             choices += ["talk", "talk"]
         c = random.choice(choices)
@@ -566,6 +795,24 @@ class PetWindow(QWidget):
                 a.setChecked(os.path.normcase(d) == os.path.normcase(current))
                 a.triggered.connect(lambda _=False, d=d: self._set_project(d))
         menu.addMenu(adv)
+
+        # 動作
+        act = self._menu("🎭  動作", menu)
+        act.addAction("💃 跳舞", lambda: self.anim.play("dance"))
+        act.addAction("🔄 轉一圈", lambda: self.anim.play("spin"))
+        act.addAction("👋 揮手打招呼", self._greet)
+        act.addAction("🦀 走一走", lambda: self.start_walk(duration=4.0))
+        act.addAction("😴 睡覺", self.anim.sleep_now)
+        act.addSeparator()
+        wd = act.addAction("閒著時到處走走")
+        wd.setCheckable(True)
+        wd.setChecked(bool(s["wander"]))
+        wd.toggled.connect(lambda on: self._set_flag("wander", on))
+        fc = act.addAction("滑鼠靠近時轉頭看")
+        fc.setCheckable(True)
+        fc.setChecked(bool(s["follow_cursor"]))
+        fc.toggled.connect(lambda on: self._set_flag("follow_cursor", on))
+        menu.addMenu(act)
 
         # 大小
         size = self._menu("📏  大小", menu)
