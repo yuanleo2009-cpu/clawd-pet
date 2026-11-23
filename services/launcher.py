@@ -1,0 +1,154 @@
+"""開啟終端機並在專案資料夾裡執行 claude。
+
+優先使用 Windows Terminal (wt.exe)，沒有的話直接開 PowerShell 視窗。
+要執行的指令用 -EncodedCommand 傳遞，避免路徑中的空白、引號、分號出問題。
+"""
+from __future__ import annotations
+
+import base64
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+
+# ---------------- 桌面版 Claude 應用程式 ----------------
+STORE_FAMILY = "Claude_pzs8sxrjxfjjc"          # Microsoft Store 版的套件名稱（不隨版本改變）
+STORE_AUMID = f"{STORE_FAMILY}!Claude"
+
+
+def _protocol_exe() -> str | None:
+    """從 claude:// 協定的登錄設定找出桌面版 exe（一般安裝版）。"""
+    import winreg
+    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_CLASSES_ROOT):
+        sub = r"Software\Classes\claude\shell\open\command" if root == winreg.HKEY_CURRENT_USER \
+            else r"claude\shell\open\command"
+        try:
+            with winreg.OpenKey(root, sub) as k:
+                cmd, _ = winreg.QueryValueEx(k, "")
+        except OSError:
+            continue
+        if cmd.startswith('"'):
+            exe = cmd[1:].split('"', 1)[0]
+        else:
+            exe = cmd.split(" ", 1)[0]
+        if exe and Path(exe).is_file():
+            return exe
+    return None
+
+
+DOWNLOAD_URL = "https://claude.ai/download"
+
+
+def _store_families() -> list[str]:
+    """這台電腦上已安裝的 Claude 套件（Microsoft Store / 官網 MSIX 安裝版）。"""
+    pkgs = Path(os.environ.get("LOCALAPPDATA", "")) / "Packages"
+    found = [p.name for p in pkgs.glob("Claude_*") if p.is_dir()] if pkgs.is_dir() else []
+    found.sort(key=lambda n: n != STORE_FAMILY)  # 已知的官方套件排第一
+    return found
+
+
+def is_desktop_app_installed() -> bool:
+    if _store_families():
+        return True
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+    exe = _protocol_exe()
+    return bool(exe and Path(exe).is_file()) or (local / "AnthropicClaude" / "claude.exe").is_file()
+
+
+def open_desktop_app() -> tuple[bool, str]:
+    """開啟（或叫到前面）桌面版 Claude。回傳 (是否成功, 說明)；找不到時說明為 "missing"。"""
+    # 1) MSIX 版（Microsoft Store 或官網下載）：用應用程式 ID 啟動，和從開始功能表點開一樣
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+    for family in _store_families():
+        try:
+            subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{family}!Claude"])
+            return True, "store"
+        except OSError:
+            pass
+    # 2) 一般安裝版
+    for exe in (_protocol_exe(), str(local / "AnthropicClaude" / "claude.exe")):
+        if exe and Path(exe).is_file() and "WindowsApps" not in exe:
+            try:
+                subprocess.Popen([exe], close_fds=True)
+                return True, "exe"
+            except OSError:
+                pass
+    # 3) 最後手段：交給 claude:// 協定（沒有安裝時會丟出錯誤）
+    try:
+        os.startfile("claude://")
+        return True, "protocol"
+    except OSError:
+        return False, "missing"
+
+
+# ---------------- 終端機版 Claude Code ----------------
+def find_claude() -> str | None:
+    candidates = [
+        shutil.which("claude"),
+        str(Path.home() / ".local" / "bin" / "claude.exe"),
+        str(Path(os.environ.get("APPDATA", "")) / "npm" / "claude.cmd"),
+    ]
+    for c in candidates:
+        if c and Path(c).is_file():
+            return c
+    return None
+
+
+def find_wt() -> str | None:
+    wt = shutil.which("wt")
+    if wt:
+        return wt
+    p = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WindowsApps" / "wt.exe"
+    return str(p) if p.exists() else None
+
+
+def find_shell() -> str:
+    for name in ("pwsh", "powershell"):
+        p = shutil.which(name)
+        if p:
+            return p
+    return r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+
+def _ps_quote(s: str) -> str:
+    return s.replace("'", "''")
+
+
+def launch(folder: str, args: list[str] | None = None) -> tuple[bool, str]:
+    """回傳 (是否成功, 說明訊息)。"""
+    folder = str(Path(folder))
+    if not Path(folder).is_dir():
+        return False, f"找不到資料夾：{folder}"
+    claude = find_claude()
+    if not claude:
+        return False, "找不到 claude 指令，請先安裝 Claude Code"
+
+    arg_str = " ".join(args or [])
+    script = (
+        "$Host.UI.RawUI.WindowTitle = 'Claude Code'; "
+        # 重新讀取系統 PATH：桌寵比 Git / Claude 先啟動時，也找得到它們
+        "$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + "
+        "[Environment]::GetEnvironmentVariable('Path','User'); "
+        f"Set-Location -LiteralPath '{_ps_quote(folder)}'; "
+        f"& '{_ps_quote(claude)}' {arg_str}"
+    )
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    ps_cmd = [find_shell(), "-NoLogo", "-NoExit", "-EncodedCommand", encoded]
+
+    wt = find_wt()
+    if wt:
+        cmd = [wt]
+        if not folder.endswith("\\"):  # 磁碟根目錄（C:\）交給 Set-Location 處理即可
+            cmd += ["-d", folder]
+        try:
+            subprocess.Popen(cmd + ps_cmd, close_fds=True)
+            return True, "Windows Terminal"
+        except OSError:
+            pass
+
+    try:
+        subprocess.Popen(ps_cmd, cwd=folder, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        return True, "PowerShell"
+    except OSError as e:
+        return False, f"無法開啟終端機：{e}"

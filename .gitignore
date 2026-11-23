@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# 打包產物（安裝包放在 GitHub Releases）
+build/
+dist/
+
+# 編輯器 / 系統
+.vscode/
+.idea/
+.claude/
+Thumbs.db
+desktop.ini
