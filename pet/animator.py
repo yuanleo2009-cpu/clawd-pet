@@ -67,6 +67,10 @@ class Animator:
         self._sway_v = 0.0
         # 往下掉（吸附到底部時）
         self.falling = False
+        self._land_strength = 1.0          # 落地力道：越大壓得越扁
+        # 給視窗的一次性事件（例如跳躍落地 → 揚起一點灰塵），由 pop_events() 取走
+        self._events: list[str] = []
+        self._sent: set = set()
         # 睡覺
         self._last_interaction = now
         self.sleeping = False
@@ -84,6 +88,7 @@ class Animator:
         self.poke(now)
         self._action = name
         self._action_start = now
+        self._sent.clear()
 
     def talk(self, seconds: float, now: float | None = None) -> None:
         now = _now(now)
@@ -106,9 +111,15 @@ class Animator:
         else:
             self.play("land", now)
 
-    def land(self, now: float | None = None) -> None:
+    def land(self, now: float | None = None, strength: float = 1.0) -> None:
+        """落地。strength 約 0.4（輕輕放下）～1.6（從高處摔下來）。"""
         self.falling = False
+        self._land_strength = max(0.3, min(strength, 1.8))
         self.play("land", now)
+
+    def pop_events(self) -> list[str]:
+        ev, self._events = self._events, []
+        return ev
 
     @property
     def action(self) -> str | None:
@@ -211,8 +222,14 @@ class Animator:
         pose.rot = self._sway
         return pose
 
-    @staticmethod
-    def _apply_action(name: str, pose: Pose, a: float, sprite: str) -> str:
+    def _emit_once(self, name: str) -> None:
+        """同一次動作只送出一次事件（例如落地揚塵）。"""
+        key = (name, self._action_start)
+        if key not in self._sent:
+            self._sent.add(key)
+            self._events.append(name)
+
+    def _apply_action(self, name: str, pose: Pose, a: float, sprite: str) -> str:
         if name == "jump":
             if a < 0.12:                         # 蹲下蓄力
                 k = a / 0.12
@@ -226,6 +243,7 @@ class Animator:
                 pose.sy *= 1 + 0.14 * s
                 pose.sx *= 1 - 0.09 * s
                 return "happy"
+            self._emit_once("jump_land")         # 落地 → 視窗揚起一點灰塵
             r = (a - 0.55) / 0.25                # 落地回彈
             d = math.exp(-4 * r) * math.cos(r * math.pi * 3)
             pose.sy *= 1 - 0.2 * d
@@ -244,10 +262,13 @@ class Animator:
             pose.rot += 12 * math.exp(-3.5 * a) * math.sin(a * 30)
             return sprite
 
-        if name == "land":                       # 放下後的回彈
+        if name == "land":                       # 落地回彈：摔得越重壓得越扁
+            k = self._land_strength
             d = math.exp(-5 * a) * math.cos(a * 16)
-            pose.sy *= 1 - 0.25 * d
-            pose.sx *= 1 + 0.2 * d
+            pose.sy *= 1 - min(0.42, 0.25 * k) * d
+            pose.sx *= 1 + min(0.34, 0.2 * k) * d
+            if k > 1.0 and a < 0.14:             # 重重落地：先閉眼縮一下
+                return "blink"
             return "happy" if a < 0.3 else sprite
 
         if name == "idea":                       # 頭上冒燈泡，小跳一下

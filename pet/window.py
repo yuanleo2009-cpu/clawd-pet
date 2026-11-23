@@ -8,7 +8,7 @@ import time
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, QUrl
 from PySide6.QtGui import (QActionGroup, QColor, QDesktopServices, QFont, QGuiApplication, QIcon,
-                           QPainter)
+                           QPainter, QPen)
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon, QWidget
 
 from services import autostart, launcher, paths
@@ -16,6 +16,7 @@ from services.settings import Settings
 from services.version import __version__
 from .animator import Animator
 from .bubble import Bubble
+from .effects import Effects
 from .phrases import Phrases
 from .sprites import BASE_W, SpriteSet
 
@@ -49,6 +50,7 @@ class PetWindow(QWidget):
         self.anim = Animator()
         self.bubble = Bubble()
         self.phrases = Phrases()
+        self.fx = Effects()
         self.pose = self.anim.update(time.perf_counter())
 
         # 幾何資訊（_rebuild 會填）
@@ -112,7 +114,8 @@ class PetWindow(QWidget):
         self._dpr = dpr
         self._sprite_w, self._sprite_h = lw, lh
         self._unit = u = lw / BASE_W
-        win_w = math.ceil(lw * 1.35)
+        self.fx.clear()
+        win_w = math.ceil(lw * 2.1)  # 兩側留空間給落地灰塵（透明處滑鼠會穿透，不影響操作）
         win_h = math.ceil(lh + 8 * u)
         self.setFixedSize(win_w, win_h)
         self._center_x = win_w / 2
@@ -203,11 +206,42 @@ class PetWindow(QWidget):
         if y >= target:
             self.move(self.x(), target)
             self._fall = None
-            self.anim.land()
+            # 掉越快摔越重：壓得更扁、灰塵更多（約 0.4 輕放 ～ 1.6 從高處摔下）
+            strength = v / 1400
+            self.anim.land(strength=strength)
+            self._spawn_landing(strength)
             self._save_position()
         else:
             self.move(self.x(), round(y))
             self._fall = (target, v, y)
+
+    # ================= 落地特效 =================
+    def _spawn_landing(self, strength: float) -> None:
+        if self.settings["effects"]:
+            feet = self._feet_offset()
+            self.fx.landing(feet.x(), feet.y(), self._unit, self._sprite_w * 0.8, strength)
+
+    def _spawn_puff(self) -> None:
+        if self.settings["effects"]:
+            feet = self._feet_offset()
+            self.fx.puff(feet.x(), feet.y(), self._unit, self._sprite_w * 0.8)
+
+    def _paint_speed_lines(self, p: QPainter) -> None:
+        """往下掉時，頭上拖著幾條速度線。"""
+        if self._fall is None or not self.settings["effects"]:
+            return
+        u, v = self._unit, self._fall[1]
+        length = min(14.0, 3 + v / 260) * u
+        top = self._head_y() - 2 * u
+        c = QColor(255, 255, 255, 150)
+        p.save()
+        p.setPen(QPen(c, max(1.0, u * 0.6)))
+        t = time.perf_counter()
+        for i, off in enumerate((-0.32, -0.1, 0.14, 0.34)):
+            x = self._center_x + off * self._sprite_w
+            jitter = (math.sin(t * 23 + i * 1.7) + 1) * 1.5 * u
+            p.drawLine(QPointF(x, top - jitter), QPointF(x, top - jitter - length * (0.6 + 0.4 * (i % 2))))
+        p.restore()
 
     def _save_position(self) -> None:
         self.settings["pos"] = [self.x(), self.y()]
@@ -234,6 +268,10 @@ class PetWindow(QWidget):
         if self._fall is not None:
             self._step_fall(dt)
         self.pose = self.anim.update(now)
+        for ev in self.anim.pop_events():
+            if ev == "jump_land":
+                self._spawn_puff()
+        self.fx.step(dt)
         if self.anim.sleeping != self._was_sleeping:  # 睡著 / 醒來 → 切換幀率
             self._was_sleeping = self.anim.sleeping
             if self.isVisible():
@@ -269,6 +307,7 @@ class PetWindow(QWidget):
             y = snap(self._baseline + pose.dy * u)
             rect = QRectF(-sw / 2, -sh, sw, sh)
 
+        self._paint_speed_lines(p)
         p.save()
         p.translate(x, y)
         if pose.rot:
@@ -280,6 +319,7 @@ class PetWindow(QWidget):
         p.fillRect(hit, QColor(0, 0, 0, 1))
         p.drawPixmap(rect, pm, QRectF(0, 0, pm.width(), pm.height()))
         p.restore()
+        self.fx.paint(p)  # 灰塵畫在 Clawd 前面
 
         if self.anim.sleeping:
             self._paint_zzz(p)
@@ -557,6 +597,10 @@ class PetWindow(QWidget):
         sm.setChecked(bool(s["smooth"]))
         sm.setToolTip("關閉 = 像素銳利模式：靜止時最清晰，但旋轉、擠壓時會有鋸齒")
         sm.toggled.connect(self._set_smooth)
+        ef = gfx.addAction("落地特效（灰塵粒子）")
+        ef.setCheckable(True)
+        ef.setChecked(bool(s["effects"]))
+        ef.toggled.connect(lambda on: self._set_flag("effects", on))
         menu.addMenu(gfx)
 
         # 吸附底部

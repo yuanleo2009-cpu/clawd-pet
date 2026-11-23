@@ -109,16 +109,23 @@ def main():
 
         # 拖曳：往上提、左右甩；放開後受重力掉回工作列
         if anim.dragging:
-            lift = min(90.0, lift + 300 / FPS)
+            lift = min(110.0, lift + 300 / FPS)
             anim.drag_velocity(900 if int(t * 2.5) % 2 == 0 else -900)
         elif falling:
             fall_v += 4200 / FPS
             lift -= fall_v / FPS
+            w._fall = (0, fall_v, 0.0)  # 讓視窗畫出速度線
             if lift <= 0:
                 lift, fall_v, falling = 0.0, 0.0, False
-                anim.land(t)
+                w._fall = None
+                anim.land(t, strength=1.3)   # 示範用：當成從高處摔下來
+                w._spawn_landing(1.3)
 
         w.pose = anim.update(t)
+        for ev in anim.pop_events():
+            if ev == "jump_land":
+                w._spawn_puff()
+        w.fx.step(1 / FPS)
         pet = w.grab().toImage()
 
         frame = QImage(bg)

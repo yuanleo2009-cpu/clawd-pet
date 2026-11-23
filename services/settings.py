@@ -20,6 +20,7 @@ DEFAULTS = {
     "skin": "crab",         # crab = 內建 Clawd；custom = assets/clawd.png
     "fps": 120,             # 幀率；0 = 跟隨螢幕更新率
     "smooth": True,         # 抗鋸齒（平滑）繪製
+    "effects": True,        # 落地特效（灰塵粒子、衝擊線、速度線）
     "dock": "always",       # 吸附底部：always = 放開後總是落到底部；near = 靠近時吸附；off = 關閉
 }
 CHOICES = {                 # 只能是這幾個值的欄位
