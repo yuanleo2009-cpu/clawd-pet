@@ -1,129 +1,154 @@
-# ClawdPet：Clawd 桌面宠物
+# ClawdPet：Clawd 桌寵
 
-一只住在 Windows 桌面上的橘色像素小螃蟹 Clawd。双击它，就会打开桌面版 Claude 应用。
+一隻住在 Windows 桌面上的橘色像素小螃蟹 Clawd。雙擊牠，就會打開桌面版 Claude。
 
-**下载：**到 [Releases](../../releases/latest) 下载 `ClawdPet-Setup-*.exe`，双击安装即可（Windows 10/11，64 位）。
+![Clawd 示範：待機、跳一下、說話、被拎起來、掉回工作列、冒出燈泡](docs/demo.gif)
 
-> 粉丝自制的非官方作品，与 Anthropic 无关，也未获其认可。Clawd 形象及 Claude 商标归 Anthropic 所有。仅供个人非商业使用。
+**下載：**到 [Releases](../../releases/latest) 下載 `ClawdPet-Setup-*.exe`，雙擊安裝即可（Windows 10/11，64 位元）。
 
-## 功能
+> 非官方的粉絲作品，與 Anthropic 無關，也未獲其認可。程式碼以 [MIT 授權](LICENSE) 釋出；**授權只涵蓋程式碼**，Clawd 形象與 Claude 商標歸 Anthropic 所有，不在授權範圍內。僅供個人非商業使用。
+>
+> 介面目前只有繁體中文（安裝精靈支援繁中、簡中、英文）。
 
-| 操作 | 反应 |
+---
+
+# 使用者說明
+
+## 安裝
+
+1. 從 [Releases](../../releases/latest) 下載 `ClawdPet-Setup-<版本>.exe`。
+2. 雙擊執行。安裝檔沒有數位簽章，Windows 可能顯示「Windows 已保護你的電腦」：點「其他資訊」→「仍要執行」。
+   - 想確認檔案沒被動過：每個 Release 都附有 SHA-256，可以用 PowerShell 比對：
+     ```powershell
+     Get-FileHash .\ClawdPet-Setup-1.1.0.exe -Algorithm SHA256
+     ```
+   - 從 v1.1.0 起，安裝檔由 GitHub Actions 從公開的原始碼自動打包（見 `.github/workflows/release.yml`），打包過程記錄在 Actions 頁面，任何人都能檢查。
+3. 依精靈安裝：只裝給目前使用者，不需要系統管理員權限。可以選擇建立桌面捷徑、開機自動啟動。
+4. 安裝完會檢查電腦裡有沒有 Claude 桌面版；沒有的話會問你要不要打開 https://claude.ai/download 。
+
+安裝後可以從「開始」功能表或 Windows 搜尋輸入 `Clawd` 開啟。
+
+## 怎麼玩
+
+| 操作 | 反應 |
 |---|---|
-| 放着不管 | 缓慢上下浮动、眨眼、偶尔转身左右张望；3 分钟没人理就睡觉（冒 z） |
-| 单击 | 随机：跳一下、压扁回弹、摇晃，或冒气泡说一句话（边说边挥手） |
-| 双击 | 打开桌面版 Claude 应用（已经开着的话，会把窗口叫到最前面） |
-| 拖动 | 被拎起来：身体拉长、手举高、脚垂下，随拖动方向晃动；放下会回弹，并记住位置 |
-| 拖动后放开 | 吸附：像受重力一样掉下去，站在工作列上（可以在半空中接住它） |
-| 工作列右下角图标（^ 箭头里） | 左键：显示或隐藏 Clawd；右键：完整设置菜单，包括「结束」 |
-| 右键 | 菜单：开启 Claude、进阶（终端版 Claude Code）、大小、画面（帧率、抗锯齿）、造型、说话设置、开机自启、重设位置、退出 |
+| 放著不管 | 緩慢上下浮動、眨眼、偶爾轉身左右張望；3 分鐘沒人理就睡覺（冒 z） |
+| 單擊 | 隨機：跳一下、壓扁回彈、搖晃，或冒泡泡說一句話（邊說邊揮手） |
+| 雙擊 | 開啟桌面版 Claude（已經開著的話，會把視窗叫到最前面；沒安裝會提示去下載） |
+| 拖動 | 被拎起來：身體拉長、手舉高、腳垂下，隨拖動方向晃動 |
+| 放開 | 像受重力一樣掉下去，站在工作列上（半空中可以再接住牠） |
+| 右鍵 | 設定選單（見下方） |
+| 工作列右下角圖示（^ 箭頭裡） | 左鍵：顯示 / 隱藏 Clawd；右鍵：同一份設定選單 |
 
-**吸附底部**（右键 → 🧲 吸附底部）：
-- 放开后总是落到底部（默认）
-- 靠近底部时吸附
-- 关闭
-- 「立刻落到底部」可以马上让它掉下去。
+視窗透明、無邊框、永遠在最上層，不佔工作列，也不會出現在 Alt+Tab 裡。透明的地方滑鼠會直接穿透，不影響你操作底下的視窗。
 
-**工作列图标**：Windows 11 默认把新图标收在 ^ 箭头里。想让它一直显示在工作列上，把图标从箭头里拖到工作列上就行。
+## 右鍵選單
 
-**画面设置**（右键 → 🎞 畫面）：
-- 帧率：可选 30、60、120（默认）、144、240，或跟随屏幕刷新率。120 FPS 下约占 0.5% 的 CPU。
-- 抗锯齿（平滑）：默认开启。素材以 2 倍精度准备，再平滑缩放，所以旋转、挤压、浮动时边缘都是平滑的；关掉就是纯像素锐利模式。
+- **🚀 開啟 Claude**：和雙擊一樣。
+- **💻 進階：終端機版 Claude Code**：在指定的專案資料夾裡用終端機開啟命令列版 Claude Code（需要另外安裝 `claude` 指令）。
+- **📏 大小**：小 / 中 / 大 / 特大（寬約 96 / 128 / 160 / 192 px），會依螢幕縮放比例換算，保持整數倍放大，不會模糊。
+- **🎞 畫面**
+  - 幀率：30、60、120（預設）、144、240，或跟隨螢幕更新率。睡著時會自動降到 30 FPS 省電。
+  - 抗鋸齒（平滑）：預設開啟，旋轉、擠壓、浮動時邊緣平滑；關掉就是純像素銳利模式。
+- **🧲 吸附底部**：放開後總是落到底部（預設）/ 靠近底部時吸附 / 關閉；還有「立刻落到底部」。
+- **🎨 造型**：內建 Clawd，或使用自訂圖片（見「自訂」）。
+- **💬 說話**：點擊時冒泡泡、偶爾自言自語、編輯台詞。
+- **⚙ 開機自動啟動**、**📍 重設位置**、**👋 結束**。最下面會顯示目前版本。
 
-窗口透明、无边框、始终置顶，不占任务栏，也不出现在 Alt+Tab 里。透明的地方鼠标会直接穿透，不影响你操作底下的窗口。
+Windows 11 預設把新圖示收在 ^ 箭頭裡；想讓它一直顯示，把圖示從箭頭裡拖到工作列上即可。
 
-## 安装包（给朋友用）
+## 自訂
 
-把 `dist\ClawdPet-Setup-1.0.0.exe` 传给朋友，他们双击后按向导安装即可：
+- **台詞**：右鍵 → 💬 說話 → 編輯台詞…。每行一句，存檔後立即生效。
+- **自訂圖片**：把透明背景的 PNG 命名為 `clawd.png`，放到安裝資料夾的 `assets\` 裡（`%LOCALAPPDATA%\Programs\ClawdPet\assets\clawd.png`，沒有 `assets` 就自己建），或放到 `%APPDATA%\ClawdPet\clawd.png`；然後右鍵 → 🎨 造型 → 自訂圖片。已經放大過的像素圖會自動還原成原始像素；單張圖模式下所有動作都靠變換。
 
-- **安装位置：**只装给当前用户（`%LOCALAPPDATA%\Programs\ClawdPet`），不需要管理员权限。
-- **向导语言：**会依系统语言自动选择繁体中文、简体中文或英文。
-- **可选项：**桌面快捷方式、开机自动启动；最后一页可以勾「立即启动」。
-- **检查 Claude：**安装完会检查电脑里有没有 Claude 桌面版。没有的话，会询问是否打开 https://claude.ai/download。
-- **双击 Clawd：**会自动找到朋友电脑里的 Claude 桌面版，不管是从 Microsoft Store 还是官网安装的都可以；找不到时也会提示去下载。
-- **卸载：**在「设置 → 应用」里卸载，会一并清掉开机自启。
-- **重新安装：**新版直接覆盖安装，会自动先关掉正在运行的 Clawd。
+## 資料存放位置
 
-> 安装包没有数字签名，第一次运行时 Windows 可能显示「Windows 已保护你的电脑」。点「更多信息」→「仍要运行」即可。
-> 本程序是粉丝自制，与 Anthropic 无关；Clawd 形象属于 Anthropic，请只在朋友之间私下分享，不要公开发布或用于商业用途。
+| 內容 | 位置 |
+|---|---|
+| 程式本體 | `%LOCALAPPDATA%\Programs\ClawdPet` |
+| 設定（位置、大小、幀率…） | `%APPDATA%\ClawdPet\settings.json`（刪掉就恢復預設；手改壞的欄位會自動改用預設值） |
+| 台詞 | `%APPDATA%\ClawdPet\phrases.txt` |
+| 錯誤紀錄 | `%APPDATA%\ClawdPet\error.log`（程式出錯時才會產生，回報問題時請附上） |
 
-## 直接使用
+## 解除安裝
 
-1. 双击 `dist\ClawdPet.exe`。
-2. 双击 Clawd，就会打开桌面版 Claude。
-3. （进阶）右键 → 💻 進階：終端機版 Claude Code，可以在指定的项目文件夹里，用终端打开命令行版 Claude Code。
+「設定 → 應用程式」搜尋「Clawd 桌寵」→ 解除安裝。會先請 Clawd 正常結束，並清掉開機自動啟動；最後會問你要不要一併刪除設定與台詞。
 
-exe 可以复制到任何地方（例如 `D:\Apps\ClawdPet.exe`）。搬动之后，在右键菜单重新勾一次「开机自动启动」即可。
+---
 
-### 加到 Steam
+# 開發者說明
 
-Steam → 左下角「添加游戏」→「添加非 Steam 游戏」→ 选 `ClawdPet.exe`。
-如果 Steam 界面（Shift+Tab）造成闪烁，在该游戏的「属性」里关掉「在游戏中启用 Steam 界面」。
+## 環境
 
-## 开发环境
-
-需要 Python 3.13（已用 winget 安装）。
+需要 Windows 10/11 與 Python 3.13。
 
 ```powershell
-# 第一次：建立虚拟环境并安装依赖
 py -3.13 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 
-# 运行（pythonw 不会出现黑色控制台窗口）
+# 執行（pythonw 不會跳出主控台視窗；想看錯誤訊息改用 python）
 .\.venv\Scripts\pythonw.exe main.py
 
-# 想看报错信息时用 python
-.\.venv\Scripts\python.exe main.py
+# 單元測試
+.\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
-## 打包成 exe
+- `requirements.txt`：執行需要的套件（PySide6）。
+- `requirements-dev.txt`：再加上打包用的 PyInstaller，以及產生示範動畫用的 Pillow。
+
+## 打包
 
 ```powershell
 .\build.ps1
 ```
 
-会输出两个文件：
-- `dist\ClawdPet.exe`：单一文件，约 24MB，不需要另外安装 Python。打包设置在 `ClawdPet.spec`，里面会拿掉用不到的组件来瘦身，比如软件 OpenGL、加密库、多余的 Qt 插件。
-- `dist\ClawdPet-Setup-<版本>.exe`：安装包，需要 Inno Setup 6（`winget install JRSoftware.InnoSetup`）。
+需要 Inno Setup 6（`winget install JRSoftware.InnoSetup`）。會產生：
 
-脚本会先关掉正在运行的 ClawdPet 再覆盖。要更新版本号，改 `installer\ClawdPet.iss` 里的 `AppVersion`。
+- `dist\ClawdPet\`：程式資料夾（`ClawdPet.exe` + `_internal\`）。用資料夾模式而不是單一 exe，啟動不用每次解壓到 `%TEMP%`，比較快、不留暫存檔，也比較不會被防毒誤判。
+- `dist\ClawdPet-Setup-<版本>.exe`：安裝包（約 25 MB），以及同名的 `.sha256`。
 
-> PyInstaller 打包的 exe 偶尔会被杀毒软件误报。遇到的话，把 `dist` 文件夹加入白名单即可。
+`ClawdPet.spec` 會拿掉用不到的元件（軟體 OpenGL、加密函式庫、多餘的 Qt 外掛）來瘦身。
 
-## 文件结构
+## 發布新版本
+
+1. 改 `services/version.py` 的 `__version__`（安裝包和選單裡的版本都從這裡來）。
+2. commit 後推一個同名的 tag，例如：
+   ```powershell
+   git tag v1.1.0
+   git push origin main v1.1.0
+   ```
+3. GitHub Actions（`.github/workflows/release.yml`）會在 Windows 機器上跑測試、打包，並建立 Release，附上安裝檔與 SHA-256。
+
+## 檔案結構
 
 ```
-main.py                 程序入口；只允许运行一只（再开一次会让原来那只跳出来打招呼）
+main.py                 程式入口；只允許一隻（再開一次會叫原本那隻出來；--quit 請它正常結束）
 pet/
-  window.py             主窗口：绘制、鼠标（单击/双击/拖动）、右键菜单
-  animator.py           动画状态机：浮动、张望、眨眼、跳、压扁、摇晃、被拎起、睡觉
-  sprites.py            读取素材，按整数倍最近邻放大（像素清晰），支持自定义单张图片
-  bubble.py             对话气泡
-  phrases.py            台词读取（改完存档立即生效）
+  window.py             主視窗：繪製、滑鼠（單擊/雙擊/拖動）、吸附、工作列圖示、右鍵選單
+  animator.py           動畫狀態機（純計算，時間由外部傳入，方便測試）
+  sprites.py            讀取素材，整數倍最近鄰放大；自訂單張圖片
+  bubble.py             對話泡泡
+  phrases.py            台詞讀取（存檔後立即生效）
 services/
-  launcher.py           打开终端运行 claude
-  autostart.py          开机自启（写入当前用户的注册表启动项，不需要管理员权限）
-  settings.py           设置文件
-  paths.py              路径（开发模式 / exe 模式通用）
-tools/make_sprites.py   用程序画出所有动作的素材
-assets/
-  sprites/*.png         8 个动作帧（40×38 原始像素）
-  phrases.txt           默认台词
-  icon.ico / icon.png   图标
-build.ps1               一键打包
+  launcher.py           開啟桌面版 Claude / 終端機版 Claude Code
+  autostart.py          開機自動啟動（目前使用者的登錄機碼，不需要系統管理員）
+  settings.py           設定檔（逐欄檢查，壞掉的值改用預設）
+  paths.py              路徑（開發模式 / 打包後通用）
+  version.py            版本號
+tools/
+  make_sprites.py       用程式畫出所有動作的素材
+  make_demo_gif.py      產生 docs/demo.gif（離屏繪製）
+tests/                  單元測試（動畫、設定檔）
+installer/              Inno Setup 安裝腳本與中文語系檔
+assets/                 素材、圖示、預設台詞
+docs/                   README 用的圖
 ```
 
-## 自定义
+## 技術說明
 
-- **台词**：右键 → 💬 說話 → 編輯台詞…（实际文件：`%APPDATA%\ClawdPet\phrases.txt`）。每行一句，存档后立即生效。
-- **大小**：右键 → 📏 大小，有小、中、大、特大四档（螃蟹宽约 96 / 128 / 160 / 192px）。会依屏幕缩放比例自动换算，并保持整数倍放大，所以不会模糊。
-- **造型 / 动作素材**：改 `tools\make_sprites.py`（以「格」为单位画矩形），再执行 `.\build.ps1` 就会重新生成素材并打包。
-- **用自己的单张图片**：把透明背景的 PNG 放到 `assets\clawd.png`（打包版放在 exe 旁边的 `assets\` 里），然后右键 → 🎨 造型 → 自訂圖片。如果是已经放大过的像素图，程序会自动还原成原始像素。单张图片模式下，所有动作都靠变换实现。
-- **设置文件**：`%APPDATA%\ClawdPet\settings.json`（位置、大小、项目文件夹等）。删掉它就会恢复默认。
-
-## 技术说明
-
-- **Python + PySide6 (Qt 6)**：透明无边框置顶窗口、鼠标穿透、高 DPI 都由 Qt 原生支持，代码好改。
-- **像素清晰**：素材按「屏幕实际像素」的整数倍最近邻放大，绘制位置也对齐到实际像素。
-- **动画**：一个计时器在动作中跑 60fps、待机时 30fps，每帧由 `animator.py` 算出要显示哪一帧，以及位移、缩放、旋转。
-- **启动 Claude**：PowerShell 命令用 `-EncodedCommand` 传递，路径里有空格、引号也不会出错。
+- **Python + PySide6 (Qt 6)**：透明無邊框置頂視窗、滑鼠穿透、高 DPI 都由 Qt 原生支援。
+- **像素清晰**：素材以「螢幕實際像素」的整數倍最近鄰放大；抗鋸齒模式再加 2 倍超取樣後平滑縮放。
+- **動畫**：一個計時器以設定的幀率（預設 120，睡著時 30）呼叫 `animator.py`，算出這一幀要顯示的圖與位移、縮放、旋轉。
+- **開啟 Claude**：桌面版用 Windows 應用程式 ID（`shell:AppsFolder`）啟動；終端機版的指令用 `-EncodedCommand` 傳遞，路徑有空白、引號、分號都不會出錯。
+- **修改造型**：改 `tools/make_sprites.py`（以「格」為單位畫矩形），`build.ps1` 會重新產生素材。

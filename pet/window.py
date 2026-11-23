@@ -7,12 +7,13 @@ import random
 import time
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, QUrl
-from PySide6.QtGui import (QAction, QActionGroup, QColor, QDesktopServices, QFont, QGuiApplication,
-                           QIcon, QPainter)
+from PySide6.QtGui import (QActionGroup, QColor, QDesktopServices, QFont, QGuiApplication, QIcon,
+                           QPainter)
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon, QWidget
 
 from services import autostart, launcher, paths
 from services.settings import Settings
+from services.version import __version__
 from .animator import Animator
 from .bubble import Bubble
 from .phrases import Phrases
@@ -67,8 +68,9 @@ class PetWindow(QWidget):
         self._last_mouse = (QPoint(), 0.0)
         self._click_timer = QTimer(self, singleShot=True)
         self._click_timer.timeout.connect(self._on_single_click)
-        self._fall: tuple[int, float] | None = None  # (目標 y, 目前速度)
+        self._fall: tuple[int, float, float] | None = None  # (目標 y, 目前速度, 目前 y（浮點數）)
         self._last_tick = time.perf_counter()
+        self._was_sleeping = False
 
         # 動畫計時器（幀率可在右鍵 → 畫面 調整）
         self._tick = QTimer(self)
@@ -190,21 +192,22 @@ class PetWindow(QWidget):
             self.anim.land()
             self._save_position()
             return
-        self._fall = (target, 0.0)
+        self._fall = (target, 0.0, float(self.y()))
         self.anim.falling = True
 
     def _step_fall(self, dt: float) -> None:
-        target, v = self._fall
+        # y 用浮點數累積：每幀從整數座標重算的話，小數被捨去，幀率越高掉得越慢
+        target, v, y = self._fall
         v += 4200 * dt                     # 重力加速度（像素/秒²）
-        ny = self.y() + v * dt
-        if ny >= target:
+        y += v * dt
+        if y >= target:
             self.move(self.x(), target)
             self._fall = None
             self.anim.land()
             self._save_position()
         else:
-            self.move(self.x(), round(ny))
-            self._fall = (target, v)
+            self.move(self.x(), round(y))
+            self._fall = (target, v, y)
 
     def _save_position(self) -> None:
         self.settings["pos"] = [self.x(), self.y()]
@@ -219,7 +222,11 @@ class PetWindow(QWidget):
         return max(15, min(fps, 360))
 
     def _apply_fps(self) -> None:
-        self._tick.start(max(1, round(1000 / self.target_fps())))
+        """依設定啟動計時器。睡著時只有呼吸和 z，降到 30 FPS 省電（筆電續航）。"""
+        fps = self.target_fps()
+        if self.anim.sleeping:
+            fps = min(fps, 30)
+        self._tick.start(max(1, round(1000 / fps)))
 
     def _on_tick(self) -> None:
         now = time.perf_counter()
@@ -227,6 +234,10 @@ class PetWindow(QWidget):
         if self._fall is not None:
             self._step_fall(dt)
         self.pose = self.anim.update(now)
+        if self.anim.sleeping != self._was_sleeping:  # 睡著 / 醒來 → 切換幀率
+            self._was_sleeping = self.anim.sleeping
+            if self.isVisible():
+                self._apply_fps()
         self.repaint()  # 立即重繪，不等事件佇列合併，幀率才準
         self.bubble.follow(self._head_global())
         if self._debug:
@@ -412,7 +423,7 @@ class PetWindow(QWidget):
     # ================= Claude =================
     def open_claude_app(self) -> None:
         """雙擊：開啟桌面版 Claude（已經開著的話會叫到前面）。"""
-        ok, msg = launcher.open_desktop_app()
+        ok, _ = launcher.open_desktop_app()
         if ok:
             self.anim.play("idea")
             self.say(random.choice(LAUNCH_LINES))
@@ -598,6 +609,8 @@ class PetWindow(QWidget):
         menu.addAction("📍  重設位置", self.reset_position)
         menu.addSeparator()
         menu.addAction("👋  結束", self.quit)
+        ver = menu.addAction(f"Clawd 桌寵 v{__version__}")
+        ver.setEnabled(False)
         return menu
 
     def _set_project(self, folder: str) -> None:

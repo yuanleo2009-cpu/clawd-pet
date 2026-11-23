@@ -1,7 +1,10 @@
-"""開啟終端機並在專案資料夾裡執行 claude。
+"""開啟 Claude。
 
-優先使用 Windows Terminal (wt.exe)，沒有的話直接開 PowerShell 視窗。
-要執行的指令用 -EncodedCommand 傳遞，避免路徑中的空白、引號、分號出問題。
+- 桌面版 Claude 應用程式（雙擊 Clawd）：open_desktop_app()
+- 終端機版 Claude Code（右鍵 → 進階）：launch()
+  優先使用 Windows Terminal (wt.exe)，沒有的話直接開 PowerShell 視窗。
+  要執行的指令用 -EncodedCommand 傳遞，資料夾路徑也只出現在編碼後的指令裡，
+  所以路徑中有空白、引號、分號都不會出問題（wt 會把分號當成指令分隔）。
 """
 from __future__ import annotations
 
@@ -13,7 +16,8 @@ from pathlib import Path
 
 
 # ---------------- 桌面版 Claude 應用程式 ----------------
-STORE_FAMILY = "Claude_pzs8sxrjxfjjc"          # Microsoft Store 版的套件名稱（不隨版本改變）
+# 官方 MSIX 套件名稱（Microsoft Store 與官網下載都是這個，不隨版本改變）
+STORE_FAMILY = "Claude_pzs8sxrjxfjjc"
 STORE_AUMID = f"{STORE_FAMILY}!Claude"
 
 
@@ -40,16 +44,13 @@ def _protocol_exe() -> str | None:
 DOWNLOAD_URL = "https://claude.ai/download"
 
 
-def _store_families() -> list[str]:
-    """這台電腦上已安裝的 Claude 套件（Microsoft Store / 官網 MSIX 安裝版）。"""
-    pkgs = Path(os.environ.get("LOCALAPPDATA", "")) / "Packages"
-    found = [p.name for p in pkgs.glob("Claude_*") if p.is_dir()] if pkgs.is_dir() else []
-    found.sort(key=lambda n: n != STORE_FAMILY)  # 已知的官方套件排第一
-    return found
+def _store_installed() -> bool:
+    """官方 MSIX 版是否已安裝。只認已知的套件名稱，其他名稱交給後面的 claude:// 協定處理。"""
+    return (Path(os.environ.get("LOCALAPPDATA", "")) / "Packages" / STORE_FAMILY).is_dir()
 
 
 def is_desktop_app_installed() -> bool:
-    if _store_families():
+    if _store_installed():
         return True
     local = Path(os.environ.get("LOCALAPPDATA", ""))
     exe = _protocol_exe()
@@ -60,9 +61,9 @@ def open_desktop_app() -> tuple[bool, str]:
     """開啟（或叫到前面）桌面版 Claude。回傳 (是否成功, 說明)；找不到時說明為 "missing"。"""
     # 1) MSIX 版（Microsoft Store 或官網下載）：用應用程式 ID 啟動，和從開始功能表點開一樣
     local = Path(os.environ.get("LOCALAPPDATA", ""))
-    for family in _store_families():
+    if _store_installed():
         try:
-            subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{family}!Claude"])
+            subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{STORE_AUMID}"])
             return True, "store"
         except OSError:
             pass
@@ -138,11 +139,9 @@ def launch(folder: str, args: list[str] | None = None) -> tuple[bool, str]:
 
     wt = find_wt()
     if wt:
-        cmd = [wt]
-        if not folder.endswith("\\"):  # 磁碟根目錄（C:\）交給 Set-Location 處理即可
-            cmd += ["-d", folder]
+        # 不傳 -d：資料夾由腳本裡的 Set-Location 切換（wt 會把路徑裡的分號當成指令分隔）
         try:
-            subprocess.Popen(cmd + ps_cmd, close_fds=True)
+            subprocess.Popen([wt] + ps_cmd, close_fds=True)
             return True, "Windows Terminal"
         except OSError:
             pass

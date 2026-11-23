@@ -1,0 +1,4 @@
+# 開發 / 打包才需要的套件（一般執行只要 requirements.txt）
+-r requirements.txt
+pyinstaller==6.22.3
+pillow==12.0.0  # 只有 tools\make_demo_gif.py 會用到

@@ -51,16 +51,25 @@ print(f"[ClawdPet] removed {before - len(a.binaries) - len(a.datas)} unused file
 
 pyz = PYZ(a.pure)
 
+# 資料夾模式（dist\ClawdPet\ClawdPet.exe + _internal\）：
+# 不用每次啟動都解壓到 %TEMP%，啟動較快、不會留下暫存資料夾，也比較不會被防毒誤判。
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="ClawdPet",
     debug=False,
     strip=False,
     upx=False,
     console=False,
     icon="assets/icon.ico",
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="ClawdPet",
 )

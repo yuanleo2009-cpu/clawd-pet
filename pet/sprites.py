@@ -20,8 +20,9 @@ class SpriteSet:
     def __init__(self, images: dict[str, QImage], has_frames: bool):
         self.images = images
         self.has_frames = has_frames  # False = 只有一張圖，全部動作靠變換
-        # 每一幀實際有內容的範圍（0~1 的比例），用來決定點擊範圍與泡泡位置
-        self.bounds = {n: _bounds(self.images.get(n, images["idle"])) for n in FRAMES}
+        # 每一幀實際有內容的範圍（0~1 的比例），用來決定點擊範圍與泡泡位置；同一張圖只算一次
+        idle = _bounds(images["idle"])
+        self.bounds = {n: _bounds(images[n]) if n in images and n != "idle" else idle for n in FRAMES}
 
     @property
     def size(self) -> tuple[int, int]:
@@ -75,15 +76,22 @@ class SpriteSet:
 
 
 def _bounds(img: QImage) -> QRectF:
-    w, h = img.width(), img.height()
-    if w * h > 250_000:
+    """有顏色（不透明）區域的範圍。整列處理透明度資料，大圖也很快。"""
+    a = img.convertToFormat(QImage.Format.Format_Alpha8)
+    w, h, bpl = a.width(), a.height(), a.bytesPerLine()
+    if w == 0 or h == 0:
         return QRectF(0, 0, 1, 1)
+    data = bytes(a.constBits())
     x0, y0, x1, y1 = w, h, -1, -1
     for y in range(h):
-        for x in range(w):
-            if img.pixelColor(x, y).alpha() > 0:
-                x0, y0 = min(x0, x), min(y0, y)
-                x1, y1 = max(x1, x), max(y1, y)
+        row = data[y * bpl: y * bpl + w]
+        left = w - len(row.lstrip(b"\0"))
+        if left == w:  # 整列透明
+            continue
+        right = len(row.rstrip(b"\0")) - 1
+        x0, x1 = min(x0, left), max(x1, right)
+        y0 = min(y0, y)
+        y1 = y
     if x1 < 0:
         return QRectF(0, 0, 1, 1)
     return QRectF(x0 / w, y0 / h, (x1 - x0 + 1) / w, (y1 - y0 + 1) / h)
@@ -95,37 +103,41 @@ def _prepare_custom(img: QImage) -> QImage:
     g = _detect_block(img)
     if g > 1:  # 已經被放大過的像素圖 → 還原成原始像素
         img = img.scaled(img.width() // g, img.height() // g, _IGNORE, _FAST)
-    b = _bounds(img)
+    b = _bounds(img)  # 裁掉四周透明的邊（大圖也會裁）
     w, h = img.width(), img.height()
     return img.copy(round(b.x() * w), round(b.y() * h), round(b.width() * w), round(b.height() * h))
 
 
 def _detect_block(img: QImage) -> int:
-    """估計每個「像素點」實際佔幾個像素（所有同色連續長度的最大公因數）。"""
-    w, h = img.width(), img.height()
+    """估計每個「像素點」實際佔幾個像素（所有同色連續長度的最大公因數）。
+
+    只抽樣約 96 列、96 欄，並直接讀原始像素資料，不逐點呼叫 Qt。
+    """
+    w, h, bpl = img.width(), img.height(), img.bytesPerLine()
+    px = memoryview(bytes(img.constBits())).cast("I")  # ARGB32：每個像素 4 bytes
+    stride = bpl // 4
+
+    def runs_gcd(values, g):
+        run, prev = 1, values[0]
+        for v in values[1:]:
+            if v == prev:
+                run += 1
+            else:
+                g = math.gcd(g, run)
+                if g == 1:
+                    return 1
+                run, prev = 1, v
+        return g
+
     g = 0
     for y in range(0, h, max(1, h // 96)):
-        run, prev = 1, img.pixel(0, y)
-        for x in range(1, w):
-            px = img.pixel(x, y)
-            if px == prev:
-                run += 1
-            else:
-                g = math.gcd(g, run)
-                if g == 1:
-                    return 1
-                run, prev = 1, px
+        g = runs_gcd(px[y * stride: y * stride + w].tolist(), g)
+        if g == 1:
+            return 1
     for x in range(0, w, max(1, w // 96)):
-        run, prev = 1, img.pixel(x, 0)
-        for y in range(1, h):
-            px = img.pixel(x, y)
-            if px == prev:
-                run += 1
-            else:
-                g = math.gcd(g, run)
-                if g == 1:
-                    return 1
-                run, prev = 1, px
+        g = runs_gcd(px[x: h * stride: stride].tolist(), g)
+        if g == 1:
+            return 1
     return max(g, 1)
 
 

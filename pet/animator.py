@@ -31,14 +31,19 @@ class Pose:
     anchor_top: bool = False  # True = 以頭頂為支點（被拎起來時）
 
 
+def _now(now: float | None) -> float:
+    return time.perf_counter() if now is None else now
+
+
 def _ease(p: float) -> float:
     p = min(max(p, 0.0), 1.0)
     return p * p * (3 - 2 * p)
 
 
 class Animator:
-    def __init__(self):
-        now = time.perf_counter()
+    def __init__(self, now: float | None = None):
+        # 所有時間都可以從外部傳入（測試時用假時間）；不傳就用目前時間
+        now = time.perf_counter() if now is None else now
         self.t0 = now
         self._last = now
         # 面向：1 = 原圖方向，-1 = 翻轉
@@ -67,24 +72,26 @@ class Animator:
         self.sleeping = False
 
     # ---------- 外部呼叫 ----------
-    def poke(self) -> bool:
+    def poke(self, now: float | None = None) -> bool:
         """有互動：重設睡眠計時。回傳原本是否在睡覺。"""
         was = self.sleeping
         self.sleeping = False
-        self._last_interaction = time.perf_counter()
+        self._last_interaction = _now(now)
         return was
 
-    def play(self, name: str) -> None:
-        self.poke()
+    def play(self, name: str, now: float | None = None) -> None:
+        now = _now(now)
+        self.poke(now)
         self._action = name
-        self._action_start = time.perf_counter()
+        self._action_start = now
 
-    def talk(self, seconds: float) -> None:
-        self.poke()
-        self._talk_until = time.perf_counter() + seconds
+    def talk(self, seconds: float, now: float | None = None) -> None:
+        now = _now(now)
+        self.poke(now)
+        self._talk_until = now + seconds
 
-    def start_drag(self) -> None:
-        self.poke()
+    def start_drag(self, now: float | None = None) -> None:
+        self.poke(now)
         self.dragging = True
         self._action = None
         self._vx = self._sway = self._sway_v = 0.0
@@ -92,16 +99,20 @@ class Animator:
     def drag_velocity(self, vx: float) -> None:
         self._vx = self._vx * 0.6 + vx * 0.4  # 平滑一點，避免抖動
 
-    def end_drag(self, fall: bool = False) -> None:
+    def end_drag(self, fall: bool = False, now: float | None = None) -> None:
         self.dragging = False
         if fall:
             self.falling = True
         else:
-            self.play("land")
+            self.play("land", now)
 
-    def land(self) -> None:
+    def land(self, now: float | None = None) -> None:
         self.falling = False
-        self.play("land")
+        self.play("land", now)
+
+    @property
+    def action(self) -> str | None:
+        return self._action
 
     # ---------- 每幀更新 ----------
     def update(self, now: float) -> Pose:

@@ -1,2 +1,2 @@
+# 執行 Clawd 需要的套件
 PySide6-Essentials==6.12.0
-pyinstaller==6.22.3
