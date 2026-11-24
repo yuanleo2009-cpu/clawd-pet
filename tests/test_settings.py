@@ -47,6 +47,11 @@ class SettingsTests(unittest.TestCase):
         self.assertFalse(bad["chime"])
         self.assertFalse(bad["chase"])
 
+    def test_idle_actions_frequency(self):
+        self.assertEqual(Settings(NOWHERE, {})["idle_actions"], "normal")
+        self.assertEqual(Settings(NOWHERE, {"idle_actions": "often"})["idle_actions"], "often")
+        self.assertEqual(Settings(NOWHERE, {"idle_actions": "always"})["idle_actions"], "normal")
+
     def test_not_a_dict_and_unknown_keys(self):
         s = Settings(NOWHERE, {"something_else": 1})
         self.assertNotIn("something_else", s.data)

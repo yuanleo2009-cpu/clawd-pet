@@ -195,6 +195,33 @@ class AnimatorTests(unittest.TestCase):
         self.assertLess(lowest, -4)
         self.assertGreaterEqual(events.count("sweat"), 2)
 
+    def test_wakes_up_by_itself_after_a_nap(self):
+        from pet.animator import NAP_SECONDS
+        a = Animator(now=0.0)
+        run(a, 0, SLEEP_AFTER + 1, step=0.5)
+        self.assertTrue(a.sleeping)
+        run(a, SLEEP_AFTER + 1.5, SLEEP_AFTER + NAP_SECONDS[0] - 2, step=0.5)
+        self.assertTrue(a.sleeping)                    # 還沒睡夠
+        events = []
+        t = SLEEP_AFTER + NAP_SECONDS[0] - 2
+        while t < SLEEP_AFTER + NAP_SECONDS[1] + 3:
+            a.update(t)
+            events += a.pop_events()
+            t += 0.5
+        self.assertFalse(a.sleeping)                   # 最晚 4 分鐘就會醒
+        self.assertIn("woke", events)
+        # 醒來後繼續活動，過 3 分鐘沒人理又會去睡
+        woke_at = t
+        run(a, woke_at, woke_at + SLEEP_AFTER + 3, step=0.5)
+        self.assertTrue(a.sleeping)
+
+    def test_stays_asleep_when_self_wake_is_off(self):
+        from pet.animator import NAP_SECONDS
+        a = Animator(now=0.0)
+        a.nap_wakes = False
+        run(a, 0, SLEEP_AFTER + NAP_SECONDS[1] + 60, step=0.5)
+        self.assertTrue(a.sleeping)
+
     def test_talk_alternates_mouth_frames(self):
         a = Animator(now=0.0)
         a.talk(1.0, 5.0)

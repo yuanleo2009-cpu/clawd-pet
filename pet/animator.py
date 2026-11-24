@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 
 SLEEP_AFTER = 180.0  # 幾秒沒互動就睡覺
+NAP_SECONDS = (120.0, 240.0)  # 睡多久會自己醒來（隨機 2～4 分鐘）
 
 ACTIONS = {          # 動作名稱: 持續秒數
     "jump": 0.8,
@@ -94,6 +95,8 @@ class Animator:
         self._last_interaction = now
         self.sleeping = False
         self._sleep_after = False          # 這次打完哈欠就睡覺
+        self.nap_wakes = True              # 睡一陣子會自己醒來（視窗依設定開關）
+        self._nap_until: float | None = None
 
     # ---------- 外部呼叫 ----------
     def poke(self, now: float | None = None) -> bool:
@@ -161,6 +164,17 @@ class Animator:
         """去睡覺（右鍵 → 動作 → 睡覺）：先打個哈欠伸懶腰，然後睡著。"""
         self._begin_yawn(_now(now))
 
+    def _wake_up(self, now: float) -> None:
+        """自己睡醒：伸個懶腰，然後重新開始活動（過一陣子沒人理又會去睡）。"""
+        self.sleeping = False
+        self._nap_until = None
+        self._last_interaction = now
+        self._action = "yawn"
+        self._action_start = now
+        self._sent.clear()
+        self._sleep_after = False
+        self._events.append("woke")
+
     def _begin_yawn(self, now: float) -> None:
         self._action = "yawn"
         self._action_start = now
@@ -215,6 +229,14 @@ class Animator:
         if (not self.sleeping and self._action is None and now >= self._talk_until
                 and now - self._last_interaction > SLEEP_AFTER - ACTIONS["yawn"]):
             self._begin_yawn(now)          # 太久沒人理：先打哈欠，打完剛好到時間就睡
+
+        if self.sleeping:
+            if self._nap_until is None:                 # 剛睡著：決定這次要睡多久
+                self._nap_until = now + random.uniform(*NAP_SECONDS)
+            elif self.nap_wakes and now >= self._nap_until:
+                self._wake_up(now)                      # 睡飽了：自己醒來伸個懶腰
+        else:
+            self._nap_until = None
 
         if self.sleeping:
             self.walking = 0

@@ -24,6 +24,7 @@ DEFAULTS = {
     "wander": True,         # 閒著時在工作列上到處走走
     "follow_cursor": True,  # 滑鼠靠近時轉頭看
     "chase": False,         # 跟著滑鼠走（滑鼠離得遠時，沿著工作列走過去）
+    "idle_actions": "normal",  # 自己做動作的頻率：off 關閉 / rare 偶爾 / normal 1～2 分鐘 / often 常常
     "water_minutes": 0,     # 喝水提醒：每幾分鐘一次；0 = 關閉
     "chime": False,         # 整點報時
     "dock": "always",       # 吸附底部：always = 放開後總是落到底部；near = 靠近時吸附；off = 關閉
@@ -33,6 +34,7 @@ CHOICES = {                 # 只能是這幾個值的欄位
     "skin": {"crab", "custom"},
     "dock": {"always", "near", "off"},
     "water_minutes": {0, 30, 45, 60, 90},
+    "idle_actions": {"off", "rare", "normal", "often"},
 }
 MAX_RECENT = 6
 

@@ -30,6 +30,10 @@ LAUNCH_LINES = ["有點子了！開工囉", "Claude 出動！", "一起把 bug �
 PET_LINES = ["好舒服～", "嘿嘿 💕", "再摸一下！", "最喜歡你了～"]
 DIZZY_LINES = ["頭好暈…", "天旋地轉～", "不要再搖了啦 @_@"]
 EAT_LINES = ["好好吃！謝謝 🍪", "再來一塊！", "嗝～吃飽了"]
+WOKE_LINES = ["睡飽了～", "呼啊～起床！", "精神滿滿！"]
+# 自己做動作的頻率：設定值 → 間隔秒數範圍（None = 不做）
+IDLE_INTERVALS = {"off": None, "rare": (180, 360), "normal": (60, 120), "often": (25, 50)}
+IDLE_TRICKS = ["dance", "spin", "wave", "exercise", "hide", "jump", "idea"]
 GRAVITY = 4200          # 重力加速度（像素/秒²）
 
 
@@ -103,7 +107,9 @@ class PetWindow(QWidget):
         self._walk_x = 0.0
         self._walk_until = 0.0
         self._next_walk = now + random.uniform(8, 15)
-        self._next_trick = now + random.uniform(60, 150)
+        self._next_trick = now + random.uniform(30, 60)   # 啟動後第一次早一點
+        self._last_trick = ""
+        self.anim.nap_wakes = self.settings["idle_actions"] != "off"
         self._next_watch_check = 0.0
         self._last_night_note = 0.0
         self._idle = QTimer(self)
@@ -392,6 +398,9 @@ class PetWindow(QWidget):
         for ev in self.anim.pop_events():
             if ev == "jump_land":
                 self._spawn_puff()
+            elif ev == "woke":       # 自己睡醒了
+                if random.random() < 0.5:
+                    self.say(random.choice(WOKE_LINES))
             elif ev == "heart":
                 self.fx.heart(self._center_x, head - 2 * u, u)
             elif ev == "note" and fx_on:
@@ -493,12 +502,26 @@ class PetWindow(QWidget):
             if random.random() < 0.7:
                 self.start_walk(duration=random.uniform(1.8, 4.5))
                 return
-        if now >= self._next_trick:
-            self._next_trick = now + random.uniform(120, 300)
-            trick = random.choice(["dance", "spin", "wave", "exercise", "hide"])
-            if trick == "hide" and not self._on_floor():
-                trick = "spin"
-            self.anim.play(trick, interaction=False)
+        interval = IDLE_INTERVALS[self.settings["idle_actions"]]
+        if interval and now >= self._next_trick:
+            self._next_trick = now + random.uniform(*interval)
+            self.do_random_trick()
+
+    def do_random_trick(self) -> str:
+        """自己隨機做一個動作（不會連續兩次做同一個；不算互動，所以不影響睡覺）。"""
+        pool = [t for t in IDLE_TRICKS if t != self._last_trick
+                and (t != "hide" or self._on_floor())]
+        trick = self._last_trick = random.choice(pool)
+        self.anim.play(trick, interaction=False)
+        return trick
+
+    def _set_idle_actions(self, v: str) -> None:
+        self.settings["idle_actions"] = v
+        self.settings.save()
+        self.anim.nap_wakes = v != "off"
+        interval = IDLE_INTERVALS[v]
+        if interval:
+            self._next_trick = time.perf_counter() + random.uniform(*interval)
 
     # ================= 提醒 =================
     def _on_reminder(self, ev: tuple) -> None:
@@ -953,6 +976,16 @@ class PetWindow(QWidget):
         act.addAction("🙈 躲貓貓", self.play_hide)
         act.addAction("😴 睡覺", lambda: self.anim.sleep_now())
         act.addSeparator()
+        freq = self._menu("自己做動作的頻率", act)
+        fgp = QActionGroup(freq)
+        for label, v in (("關閉", "off"), ("偶爾（3～6 分鐘一次）", "rare"),
+                         ("普通（1～2 分鐘一次）", "normal"), ("常常（約半分鐘一次）", "often")):
+            a = freq.addAction(label)
+            a.setCheckable(True)
+            a.setChecked(s["idle_actions"] == v)
+            fgp.addAction(a)
+            a.triggered.connect(lambda _=False, v=v: self._set_idle_actions(v))
+        act.addMenu(freq)
         wd = act.addAction("閒著時到處走走")
         wd.setCheckable(True)
         wd.setChecked(bool(s["wander"]))
