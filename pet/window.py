@@ -14,6 +14,7 @@ from PySide6.QtGui import (QActionGroup, QColor, QCursor, QDesktopServices, QFon
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon, QWidget
 
 from services import autostart, launcher, paths
+from services.reminders import Reminders
 from services.settings import Settings
 from services.version import __version__
 from .animator import Animator
@@ -28,6 +29,7 @@ LAUNCH_LINES = ["有點子了！開工囉", "Claude 出動！", "一起把 bug �
 
 PET_LINES = ["好舒服～", "嘿嘿 💕", "再摸一下！", "最喜歡你了～"]
 DIZZY_LINES = ["頭好暈…", "天旋地轉～", "不要再搖了啦 @_@"]
+EAT_LINES = ["好好吃！謝謝 🍪", "再來一塊！", "嗝～吃飽了"]
 GRAVITY = 4200          # 重力加速度（像素/秒²）
 
 
@@ -107,6 +109,10 @@ class PetWindow(QWidget):
         self._idle = QTimer(self)
         self._idle.timeout.connect(self._on_idle)
         self._idle.start(1000)
+        self._chasing = False              # 正在朝滑鼠走過去
+        self._last_wheel = 0.0
+        self.reminders = Reminders(now, time.localtime().tm_hour,
+                                   self.settings["water_minutes"], self.settings["chime"])
         self.setMouseTracking(True)        # 不按鍵也能收到滑鼠移動（摸摸用）
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
@@ -363,15 +369,9 @@ class PetWindow(QWidget):
         elif now >= self._next_watch_check:
             self._next_watch_check = now + 0.1
             self._watch_cursor(now)
+            self._maybe_chase(now)
         self.pose = self.anim.update(now)
-        head = self._head_y()
-        for ev in self.anim.pop_events():
-            if ev == "jump_land":
-                self._spawn_puff()
-            elif ev == "heart":
-                self.fx.heart(self._center_x, head - 2 * self._unit, self._unit)
-            elif ev == "note" and self.settings["effects"]:
-                self.fx.note(self._center_x, head, self._unit)
+        self._handle_anim_events()
         self.fx.step(dt)
         if self.anim.sleeping != self._was_sleeping:  # 睡著 / 醒來 → 切換幀率
             self._was_sleeping = self.anim.sleeping
@@ -384,6 +384,24 @@ class PetWindow(QWidget):
             if now - self._fps_t >= 2:
                 print(f"fps={self._frames / (now - self._fps_t):.1f}", flush=True)
                 self._frames, self._fps_t = 0, now
+
+    def _handle_anim_events(self) -> None:
+        """動畫送出的一次性事件 → 對應的特效（灰塵、愛心、音符、點心、屑屑、汗滴）。"""
+        u, fx_on = self._unit, self.settings["effects"]
+        head = self._head_y()
+        for ev in self.anim.pop_events():
+            if ev == "jump_land":
+                self._spawn_puff()
+            elif ev == "heart":
+                self.fx.heart(self._center_x, head - 2 * u, u)
+            elif ev == "note" and fx_on:
+                self.fx.note(self._center_x, head, u)
+            elif ev == "snack":      # 點心從上面掉到臉前面，0.6 秒後剛好被吃掉
+                self.fx.snack(self._center_x, max(2 * u, head - 30 * u), head + 5 * u, u, 0.6)
+            elif ev == "crumb" and fx_on:
+                self.fx.crumbs(self._center_x, head + 7 * u, u)
+            elif ev == "sweat" and fx_on:
+                self.fx.sweat(self._center_x, head + 2 * u, u, self._sprite_w * 0.6)
 
     def paintEvent(self, _):
         p = QPainter(self)
@@ -417,6 +435,8 @@ class PetWindow(QWidget):
 
         self._paint_speed_lines(p)
         p.save()
+        if pose.clip_floor:  # 躲貓貓：腳底線以下不畫，看起來像沉進工作列裡
+            p.setClipRect(QRectF(0, 0, self.width(), self._feet_offset().y()))
         p.translate(x, y)
         if pose.rot:
             p.rotate(pose.rot)
@@ -464,6 +484,8 @@ class PetWindow(QWidget):
     def _on_idle(self) -> None:
         """每秒檢查一次：閒著的時候偶爾走一走，或表演一下。"""
         now = time.perf_counter()
+        for ev in self.reminders.poll(now, time.localtime().tm_hour):
+            self._on_reminder(ev)
         if not self._free() or self.anim.walking or self.bubble.isVisible():
             return
         if self.settings["wander"] and self._on_floor() and now >= self._next_walk:
@@ -473,8 +495,83 @@ class PetWindow(QWidget):
                 return
         if now >= self._next_trick:
             self._next_trick = now + random.uniform(120, 300)
-            trick = random.choice(["dance", "spin", "wave"])
+            trick = random.choice(["dance", "spin", "wave", "exercise", "hide"])
+            if trick == "hide" and not self._on_floor():
+                trick = "spin"
             self.anim.play(trick, interaction=False)
+
+    # ================= 提醒 =================
+    def _on_reminder(self, ev: tuple) -> None:
+        kind = ev[0]
+        if kind == "water":
+            self._remind("該喝水囉 💧 起來倒杯水吧", "wave")
+        elif kind == "focus_done":
+            self._remind("專注時間結束！🎉 休息 5 分鐘吧", "dance")
+        elif kind == "break_done":
+            self._remind("休息結束，繼續加油 💪", "wave")
+        elif kind == "chime":
+            self._remind(f"{ev[1]} 點整囉 🕐", "wave")
+
+    def _remind(self, text: str, action: str) -> None:
+        """提醒一定要讓人看到：Clawd 被隱藏時改用系統通知；睡著的話先醒來。"""
+        if not self.isVisible():
+            self.tray.showMessage("Clawd 桌寵", text, self.tray.icon(), 6000)
+            return
+        self.anim.poke()
+        if self._fall is None and not self._pressed:
+            self.anim.play(action)
+        self.say(text, force=True, min_ms=6000)
+
+    def start_pomodoro(self) -> None:
+        self.reminders.start_pomodoro(time.perf_counter())
+        self.anim.play("wave")
+        self.say("開始專注 25 分鐘，加油！🍅", force=True)
+
+    def cancel_pomodoro(self) -> None:
+        self.reminders.cancel_pomodoro()
+        self.say("番茄鐘結束了", force=True)
+
+    def _set_water(self, minutes: int) -> None:
+        self.settings["water_minutes"] = minutes
+        self.settings.save()
+        self.reminders.set_water(minutes, time.perf_counter())
+        self.say(f"每 {minutes} 分鐘提醒你喝水 💧" if minutes else "喝水提醒已關閉", force=True)
+
+    def _set_chime(self, on: bool) -> None:
+        self.settings["chime"] = on
+        self.settings.save()
+        self.reminders.chime = on
+
+    # ================= 餵食、躲貓貓、跟著滑鼠 =================
+    def feed(self) -> None:
+        if self._fall is not None or self._pressed:
+            return
+        self.anim.poke()
+        self.anim.play("eat")
+        QTimer.singleShot(2150, self._after_eat)
+
+    def _after_eat(self) -> None:
+        if self.anim.action == "eat":
+            self.say(random.choice(EAT_LINES))
+
+    def play_hide(self) -> None:
+        if self._fall is not None or self._pressed:
+            return
+        if self._on_floor():
+            self.anim.play("hide")
+        else:
+            self.say("要站在工作列上才能躲貓貓啦", force=True)
+
+    def _maybe_chase(self, now: float) -> None:
+        """「跟著滑鼠走」：滑鼠離得遠時，沿著工作列朝它走過去。"""
+        if not self.settings["chase"] or not self._free() or not self._on_floor():
+            return
+        dx = QCursor.pos().x() - self._feet_global().x()
+        if abs(dx) > self._sprite_w * 1.1:
+            self._chasing = True
+            self._walk_x = float(self.x())
+            self._walk_until = now + 20
+            self.anim.walk(1 if dx > 0 else -1, now)
 
     def start_walk(self, direction: int = 0, duration: float = 3.0) -> None:
         if not self._on_floor() or self._fall is not None:
@@ -485,25 +582,42 @@ class PetWindow(QWidget):
             direction = 1 if (g.right() - cx) > (cx - g.left()) else -1
             if random.random() < 0.35:
                 direction = -direction
+        self._chasing = False
         self._walk_x = float(self.x())
         self._walk_until = time.perf_counter() + duration
         self.anim.walk(direction)
 
     def _step_walk(self, now: float, dt: float) -> None:
         if now >= self._walk_until or not self._free():
-            self.anim.stop_walk()
-            self._save_position()
+            self._end_walk()
             return
-        speed = 11 * self._unit                                  # 慢慢地橫著走
+        if self._chasing:                                        # 朝滑鼠走：隨時修正方向，走到就停
+            dx = QCursor.pos().x() - self._feet_global().x()
+            if not self.settings["chase"] or abs(dx) < self._sprite_w * 0.45:
+                self._end_walk()
+                return
+            d = 1 if dx > 0 else -1
+            if d != self.anim.walking:
+                self.anim.walk(d, now)
+        speed = (22 if self._chasing else 11) * self._unit      # 追滑鼠時走快一點
         self._walk_x += self.anim.walking * speed * dt
         g = self._screen_rect()
         fo = self._feet_offset()
         half = self.sprites.bounds["idle"].width() * self._sprite_w / 2
         left, right = g.left() + half - fo.x(), g.right() - half - fo.x()
-        if self._walk_x <= left or self._walk_x >= right:        # 走到邊緣就轉身
+        if self._walk_x <= left or self._walk_x >= right:        # 走到邊緣
             self._walk_x = max(left, min(self._walk_x, right))
-            self.anim.walk(-self.anim.walking, now)
+            if self._chasing:                                    # 追滑鼠：到邊緣就停下來等
+                self.move(round(self._walk_x), self.y())
+                self._end_walk()
+                return
+            self.anim.walk(-self.anim.walking, now)              # 散步：轉身往回走
         self.move(round(self._walk_x), self.y())
+
+    def _end_walk(self) -> None:
+        self.anim.stop_walk()
+        self._chasing = False
+        self._save_position()
 
     def _watch_cursor(self, now: float) -> None:
         """滑鼠在附近時轉過去看它（太近、太遠都不理）。"""
@@ -532,10 +646,10 @@ class PetWindow(QWidget):
         self.say(text)
 
     # ================= 說話 =================
-    def say(self, text: str, force: bool = False) -> None:
+    def say(self, text: str, force: bool = False, min_ms: int = 0) -> None:
         if not (force or self.settings["bubbles"]):
             return
-        ms = 2200 + 90 * len(text)
+        ms = max(min_ms, 2200 + 90 * len(text))
         self.bubble.say(text, self._head_global(), ms)
         self.anim.talk(min(ms / 1000, 2.0))
 
@@ -616,6 +730,8 @@ class PetWindow(QWidget):
             self.bubble.hide_now()
             self.anim.start_drag()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            if self.settings["effects"]:                         # 被抓起來嚇一跳：頭上冒「!」
+                self.fx.emote(self._center_x, self._head_y() - 5 * self._unit, self._unit)
         self.move(self._win_start + (g - self._press_global))
         now = time.perf_counter()
         lp, lt = self._last_mouse
@@ -678,6 +794,19 @@ class PetWindow(QWidget):
                 elif random.random() < 0.4:
                     self.say(random.choice(PET_LINES))
         self._hover = (x, d, travel)
+
+    def wheelEvent(self, e):
+        """在 Clawd 身上滾動滑鼠滾輪：往上變大、往下變小。"""
+        now = time.perf_counter()
+        delta = e.angleDelta().y()
+        if delta == 0 or now - self._last_wheel < 0.25:
+            return
+        self._last_wheel = now
+        sizes = [v for _, v in SIZE_PRESETS]
+        i = sizes.index(int(self.settings["size"])) + (1 if delta > 0 else -1)
+        if 0 <= i < len(sizes):
+            self._set_size(sizes[i])
+        e.accept()
 
     def leaveEvent(self, e):
         self._hover = (0, 0, 0.0)
@@ -819,7 +948,10 @@ class PetWindow(QWidget):
         act.addAction("🔄 轉一圈", lambda: self.anim.play("spin"))
         act.addAction("👋 揮手打招呼", self._greet)
         act.addAction("🦀 走一走", lambda: self.start_walk(duration=4.0))
-        act.addAction("😴 睡覺", self.anim.sleep_now)
+        act.addAction("🍪 餵點心", self.feed)
+        act.addAction("🤸 開合跳", lambda: self.anim.play("exercise"))
+        act.addAction("🙈 躲貓貓", self.play_hide)
+        act.addAction("😴 睡覺", lambda: self.anim.sleep_now())
         act.addSeparator()
         wd = act.addAction("閒著時到處走走")
         wd.setCheckable(True)
@@ -829,7 +961,37 @@ class PetWindow(QWidget):
         fc.setCheckable(True)
         fc.setChecked(bool(s["follow_cursor"]))
         fc.toggled.connect(lambda on: self._set_flag("follow_cursor", on))
+        ch = act.addAction("跟著滑鼠走")
+        ch.setCheckable(True)
+        ch.setChecked(bool(s["chase"]))
+        ch.setToolTip("滑鼠離得遠時，Clawd 會沿著工作列朝滑鼠走過去")
+        ch.toggled.connect(lambda on: self._set_flag("chase", on))
         menu.addMenu(act)
+
+        # 提醒
+        rem = self._menu("⏰  提醒", menu)
+        r = self.reminders
+        left = math.ceil(r.seconds_left(time.perf_counter()) / 60)
+        if r.phase == "focus":
+            rem.addAction(f"🍅 專注中：剩 {left} 分鐘（點此取消）", self.cancel_pomodoro)
+        elif r.phase == "break":
+            rem.addAction(f"☕ 休息中：剩 {left} 分鐘（點此結束）", self.cancel_pomodoro)
+        else:
+            rem.addAction("🍅 開始番茄鐘（專注 25 分鐘 → 休息 5 分鐘）", self.start_pomodoro)
+        water = self._menu("💧 喝水提醒", rem)
+        wg = QActionGroup(water)
+        for label, v in (("關閉", 0), ("每 30 分鐘", 30), ("每 45 分鐘", 45), ("每 60 分鐘", 60), ("每 90 分鐘", 90)):
+            a = water.addAction(label)
+            a.setCheckable(True)
+            a.setChecked(int(s["water_minutes"]) == v)
+            wg.addAction(a)
+            a.triggered.connect(lambda _=False, v=v: self._set_water(v))
+        rem.addMenu(water)
+        cm = rem.addAction("🕐 整點報時")
+        cm.setCheckable(True)
+        cm.setChecked(bool(s["chime"]))
+        cm.toggled.connect(self._set_chime)
+        menu.addMenu(rem)
 
         # 大小
         size = self._menu("📏  大小", menu)
@@ -840,6 +1002,9 @@ class PetWindow(QWidget):
             a.setChecked(int(s["size"]) == v)
             group.addAction(a)
             a.triggered.connect(lambda _=False, v=v: self._set_size(v))
+        size.addSeparator()
+        tip = size.addAction("也可以在 Clawd 身上滾動滑鼠滾輪")
+        tip.setEnabled(False)
         menu.addMenu(size)
 
         # 畫面：幀率 + 抗鋸齒

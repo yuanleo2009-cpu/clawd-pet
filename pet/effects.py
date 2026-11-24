@@ -1,4 +1,4 @@
-"""落地特效：灰塵粒子、小火花、衝擊線。
+"""特效：落地的灰塵 / 火花 / 衝擊線，以及愛心、音符、點心、汗滴、驚嘆號等小圖案。
 
 座標都是桌寵視窗內的邏輯像素；`unit` = 素材 1 個原始像素在螢幕上的大小，
 所以 Clawd 調大調小時，特效也跟著等比例縮放。
@@ -23,6 +23,14 @@ STAR_COLOR = QColor(255, 222, 89)
 HEART = [".X.X.", "XXXXX", "XXXXX", ".XXX.", "..X.."]
 NOTE = ["..XXX", "..X.X", "..X..", "XXX..", "XXX.."]
 STAR = [".X.", "XXX", ".X."]
+BANG = ["XX", "XX", "XX", "..", "XX"]                                   # 驚嘆號
+COOKIE = [".XXX.", "XXoXX", "XoXXX", "XXXoX", ".XXX."]                  # 餅乾（o = 巧克力豆）
+COOKIE_COLOR = QColor(214, 158, 92)
+CHIP_COLOR = QColor(110, 66, 32)
+CRUMB_COLOR = QColor(198, 142, 80)
+SWEAT_COLOR = QColor(140, 205, 255)
+BANG_COLOR = QColor(255, 84, 84)
+PATTERNS = {"heart": HEART, "note": NOTE, "bang": BANG, "snack": COOKIE}
 
 
 def paint_pattern(p: QPainter, pattern: list[str], cx: float, cy: float, px: float, color: QColor) -> None:
@@ -33,6 +41,10 @@ def paint_pattern(p: QPainter, pattern: list[str], cx: float, cy: float, px: flo
         for c, ch in enumerate(row):
             if ch == "X":
                 p.fillRect(QRectF(x0 + c * px, y0 + r * px, px + 0.3, px + 0.3), color)
+            elif ch == "o":      # 第二種顏色（餅乾上的巧克力豆），透明度跟著主色
+                chip = QColor(CHIP_COLOR)
+                chip.setAlphaF(color.alphaF())
+                p.fillRect(QRectF(x0 + c * px, y0 + r * px, px + 0.3, px + 0.3), chip)
 
 
 def paint_dizzy_stars(p: QPainter, cx: float, cy: float, radius: float, unit: float, t: float,
@@ -61,6 +73,7 @@ class Particle:
     size: float
     color: QColor
     age: float = 0.0
+    ay: float = 0.0    # 額外的垂直加速度（點心掉下來用）
 
 
 @dataclass
@@ -154,6 +167,39 @@ class Effects:
             side * random.uniform(3, 7) * unit, -random.uniform(9, 14) * unit,
             random.uniform(1.2, 1.5), unit * 0.95, random.choice(NOTE_COLORS)))
 
+    def snack(self, x: float, y_from: float, y_to: float, unit: float, seconds: float) -> None:
+        """餵點心：一塊餅乾從上面掉到嘴邊，剛好在 seconds 秒後抵達（然後被吃掉）。"""
+        self._unit = unit
+        dist = y_to - y_from
+        v0 = 0.4 * dist / seconds                      # 一開始慢、越掉越快
+        self.particles.append(Particle("snack", x, y_from, 0.0, v0, seconds, unit * 1.3, COOKIE_COLOR,
+                                       ay=1.2 * dist / seconds ** 2))
+
+    def crumbs(self, x: float, y: float, unit: float) -> None:
+        """吃東西掉屑屑。"""
+        self._unit = unit
+        for _ in range(3):
+            side = random.choice((-1, 1))
+            self.particles.append(Particle(
+                "spark", x + side * random.uniform(1, 5) * unit, y,
+                side * random.uniform(4, 14) * unit, -random.uniform(4, 12) * unit,
+                random.uniform(0.35, 0.55), unit * random.uniform(0.7, 1.0), CRUMB_COLOR))
+
+    def sweat(self, x: float, y: float, unit: float, width: float) -> None:
+        """運動流汗：從頭的兩側甩出汗滴。"""
+        self._unit = unit
+        side = random.choice((-1, 1))
+        for _ in range(2):
+            self.particles.append(Particle(
+                "spark", x + side * 0.42 * width, y + random.uniform(0, 3) * unit,
+                side * random.uniform(8, 16) * unit, -random.uniform(8, 14) * unit,
+                random.uniform(0.4, 0.6), unit * 1.1, SWEAT_COLOR))
+
+    def emote(self, x: float, y: float, unit: float) -> None:
+        """嚇一跳：頭上冒出驚嘆號。"""
+        self._unit = unit
+        self.particles.append(Particle("bang", x, y, 0.0, -9 * unit, 0.8, unit * 1.2, BANG_COLOR))
+
     def puff(self, x: float, y: float, unit: float, width: float) -> None:
         """小跳一下落地：腳邊冒一點點灰。"""
         self._unit = unit
@@ -187,6 +233,10 @@ class Effects:
             elif p.kind in ("heart", "note"):   # 輕飄飄往上、左右晃
                 p.vx = p.vx * math.exp(-1.5 * dt) + math.sin(p.age * 6) * 8 * u * dt
                 p.vy *= math.exp(-0.8 * dt)
+            elif p.kind == "bang":              # 驚嘆號：往上彈一下就停住
+                p.vy *= math.exp(-6 * dt)
+            elif p.kind == "snack":             # 點心：加速往下掉
+                p.vy += p.ay * dt
             else:
                 p.vy += 60 * u * dt             # 火花會掉回來
             p.x += p.vx * dt
@@ -217,10 +267,13 @@ class Effects:
         for q in self.particles:
             k = q.age / q.life
             c = QColor(q.color)
-            if q.kind in ("heart", "note"):
+            if q.kind == "snack":                            # 點心：一路清楚到被吃掉
+                paint_pattern(p, COOKIE, q.x, q.y, q.size, c)
+                continue
+            if q.kind in PATTERNS:
                 pop = min(1.0, q.age / 0.15)                 # 一開始「啵」地放大出現
                 c.setAlphaF(1.0 if k < 0.6 else (1 - k) / 0.4)
-                paint_pattern(p, HEART if q.kind == "heart" else NOTE, q.x, q.y, q.size * (0.5 + 0.5 * pop), c)
+                paint_pattern(p, PATTERNS[q.kind], q.x, q.y, q.size * (0.5 + 0.5 * pop), c)
                 continue
             if q.kind == "dust":
                 c.setAlphaF(0.95 * (1 - k) ** 1.2)

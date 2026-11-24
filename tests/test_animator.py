@@ -125,6 +125,76 @@ class AnimatorTests(unittest.TestCase):
         self.assertEqual(a.fall_spin, 0)
         self.assertEqual(a.update(1.5).rot, 0)
 
+    def test_yawns_before_falling_asleep(self):
+        a = Animator(now=0.0)
+        run(a, 0, SLEEP_AFTER - ACTIONS["yawn"] - 1, step=0.25)
+        self.assertIsNone(a.action)
+        pose = run(a, SLEEP_AFTER - ACTIONS["yawn"], SLEEP_AFTER - 1, step=0.25)
+        self.assertEqual(a.action, "yawn")
+        self.assertEqual(pose.sprite, "stretch")
+        self.assertGreater(pose.sy, 1.0)              # 伸懶腰：身體往上拉長
+        self.assertFalse(a.sleeping)
+
+    def test_interrupted_yawn_does_not_sleep(self):
+        a = Animator(now=0.0)
+        run(a, 0, SLEEP_AFTER - 1, step=0.25)
+        self.assertEqual(a.action, "yawn")
+        a.poke(SLEEP_AFTER - 0.9)                      # 打哈欠到一半被打擾
+        run(a, SLEEP_AFTER - 0.8, SLEEP_AFTER + 5, step=0.25)
+        self.assertFalse(a.sleeping)
+
+    def test_sleep_now_yawns_then_sleeps(self):
+        a = Animator(now=0.0)
+        a.sleep_now(10.0)
+        self.assertFalse(a.sleeping)
+        run(a, 10.0, 10.0 + ACTIONS["yawn"] + 0.2)
+        self.assertTrue(a.sleeping)
+
+    def test_hide_sinks_peeks_and_pops_out(self):
+        a = Animator(now=0.0)
+        a.play("hide", 0.0)
+        hidden = a.update(0.7)
+        self.assertTrue(hidden.clip_floor)
+        self.assertGreater(hidden.dy, 18)              # 整隻沉下去
+        peek = a.update(2.0)
+        self.assertTrue(peek.clip_floor)
+        self.assertTrue(8 < peek.dy < 14)              # 只露出眼睛
+        self.assertEqual(peek.sprite, "look")
+        events = []
+        for i in range(int((ACTIONS["hide"] - 2.0) * 60) + 3):
+            a.update(2.0 + i / 60)
+            events += a.pop_events()
+        self.assertIn("jump_land", events)             # 跳出來落地
+        self.assertIsNone(a.action)
+        self.assertFalse(a.update(4.0).clip_floor)
+
+    def test_eat_drops_snack_then_crumbs_then_heart(self):
+        a = Animator(now=0.0)
+        a.play("eat", 0.0)
+        events = []
+        for i in range(int(ACTIONS["eat"] * 60)):
+            pose = a.update(i / 60)
+            events += a.pop_events()
+            if 1.0 < i / 60 < 2.0:
+                self.assertIn(pose.sprite, ("chew", "blink"))
+        self.assertEqual(events[0], "snack")
+        self.assertEqual(events.count("snack"), 1)
+        self.assertGreaterEqual(events.count("crumb"), 3)
+        self.assertEqual(events[-1], "heart")
+
+    def test_exercise_jumps_and_sweats(self):
+        a = Animator(now=0.0)
+        a.play("exercise", 0.0)
+        sprites, events, lowest = set(), [], 0.0
+        for i in range(int(ACTIONS["exercise"] * 60)):
+            pose = a.update(i / 60)
+            sprites.add(pose.sprite)
+            events += a.pop_events()
+            lowest = min(lowest, pose.dy)
+        self.assertIn("lifted", sprites)               # 跳起來手舉高
+        self.assertLess(lowest, -4)
+        self.assertGreaterEqual(events.count("sweat"), 2)
+
     def test_talk_alternates_mouth_frames(self):
         a = Animator(now=0.0)
         a.talk(1.0, 5.0)

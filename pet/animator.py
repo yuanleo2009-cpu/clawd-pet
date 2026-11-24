@@ -22,8 +22,14 @@ ACTIONS = {          # 動作名稱: 持續秒數
     "dizzy": 2.6,    # 被搖暈：X X 眼、東倒西歪（視窗畫繞圈的星星）
     "pet": 1.4,      # 被摸摸：開心地扭來扭去（視窗冒愛心）
     "wave": 1.6,     # 揮手打招呼
+    "yawn": 2.0,     # 打哈欠伸懶腰（睡覺前會先做）
+    "hide": 3.4,     # 躲貓貓：沉進工作列、只露出眼睛偷看，再跳出來
+    "eat": 2.6,      # 吃點心：等點心掉下來 → 嚼嚼嚼 → 開心
+    "exercise": 3.0, # 開合跳 5 下，然後喘口氣
 }
 WALK_STEPS = 7.0     # 走路時每秒換幾次腳
+HIDE_FULL = 21.0     # 躲貓貓：整隻沉下去的深度（素材像素）
+HIDE_PEEK = 11.0     # 只露出眼睛時的深度
 
 
 @dataclass
@@ -36,6 +42,7 @@ class Pose:
     rot: float = 0.0          # 旋轉角度
     anchor_top: bool = False  # True = 以頭頂為支點（被拎起來時）
     pivot_center: bool = False  # True = 以身體中心為軸，原地旋轉（被丟出去、轉一圈時）
+    clip_floor: bool = False  # True = 腳底線以下不畫（躲貓貓沉進工作列時）
 
 
 def _now(now: float | None) -> float:
@@ -86,12 +93,14 @@ class Animator:
         # 睡覺
         self._last_interaction = now
         self.sleeping = False
+        self._sleep_after = False          # 這次打完哈欠就睡覺
 
     # ---------- 外部呼叫 ----------
     def poke(self, now: float | None = None) -> bool:
         """有互動：重設睡眠計時。回傳原本是否在睡覺。"""
         was = self.sleeping
         self.sleeping = False
+        self._sleep_after = False          # 打哈欠到一半被打擾 → 不睡了
         self._last_interaction = _now(now)
         return was
 
@@ -103,6 +112,7 @@ class Animator:
         self._action = name
         self._action_start = now
         self._sent.clear()
+        self._sleep_after = False
         self.walking = 0  # 做動作時先停下腳步
 
     def talk(self, seconds: float, now: float | None = None) -> None:
@@ -147,11 +157,16 @@ class Animator:
     def stop_walk(self) -> None:
         self.walking = 0
 
-    def sleep_now(self) -> None:
-        """馬上去睡（右鍵 → 動作 → 睡覺）。"""
-        self._action = None
+    def sleep_now(self, now: float | None = None) -> None:
+        """去睡覺（右鍵 → 動作 → 睡覺）：先打個哈欠伸懶腰，然後睡著。"""
+        self._begin_yawn(_now(now))
+
+    def _begin_yawn(self, now: float) -> None:
+        self._action = "yawn"
+        self._action_start = now
+        self._sent.clear()
         self.walking = 0
-        self.sleeping = True
+        self._sleep_after = True
 
     def watch(self, direction: int, now: float | None = None) -> None:
         """滑鼠在附近：轉向滑鼠那邊看一下。"""
@@ -198,8 +213,8 @@ class Animator:
             return pose
 
         if (not self.sleeping and self._action is None and now >= self._talk_until
-                and now - self._last_interaction > SLEEP_AFTER):
-            self.sleeping = True
+                and now - self._last_interaction > SLEEP_AFTER - ACTIONS["yawn"]):
+            self._begin_yawn(now)          # 太久沒人理：先打哈欠，打完剛好到時間就睡
 
         if self.sleeping:
             self.walking = 0
@@ -250,7 +265,10 @@ class Animator:
         if self._action:
             a = now - self._action_start
             if a >= ACTIONS[self._action]:
-                self._action = None
+                ended, self._action = self._action, None
+                if ended == "yawn" and self._sleep_after:
+                    self._sleep_after = False
+                    self.sleeping = True
             else:
                 sprite = self._apply_action(self._action, pose, a, sprite)
 
@@ -390,5 +408,75 @@ class Animator:
         if name == "wave":                       # 揮手打招呼
             pose.rot += 3 * math.sin(a * 10)
             return "talk" if int(a / 0.16) % 2 == 0 else "idle"
+
+        if name == "yawn":                       # 打哈欠伸懶腰：閉眼、手舉高、身體往上拉長
+            if a < 1.6:
+                s = math.sin(math.pi * a / 1.6)
+                pose.sy *= 1 + 0.1 * s
+                pose.sx *= 1 - 0.05 * s
+                pose.rot += 2.5 * math.sin(a * 2.2) * s
+                return "stretch"
+            return "blink"                       # 眼睛快睜不開了
+
+        if name == "hide":                       # 躲貓貓
+            pose.clip_floor = True
+            pose.rot = 0.0
+            pose.dx = 0.0
+            if a < 0.45:                         # 沉下去
+                pose.dy = HIDE_FULL * _ease(a / 0.45)
+                return "blink"
+            if a < 0.9:                          # 完全躲起來
+                pose.dy = HIDE_FULL
+                return "blink"
+            if a < 1.2:                          # 慢慢探出眼睛
+                pose.dy = HIDE_FULL + (HIDE_PEEK - HIDE_FULL) * _ease((a - 0.9) / 0.3)
+                return "look"
+            if a < 2.5:                          # 偷看：左看看、右看看、眨個眼
+                pose.dy = HIDE_PEEK + 0.6 * math.sin(a * 5)
+                if a >= 1.85 and ("hide_turn", self._action_start) not in self._sent:
+                    self._sent.add(("hide_turn", self._action_start))
+                    self._turn(self._action_start + a, -self.facing)
+                return "blink" if 1.5 < a < 1.62 else "look"
+            if a < 2.75:                         # 又縮回去
+                pose.dy = HIDE_PEEK + (HIDE_FULL - HIDE_PEEK) * _ease((a - 2.5) / 0.25)
+                return "blink"
+            p = (a - 2.75) / (ACTIONS["hide"] - 2.75)        # 哇！跳出來
+            pose.dy = HIDE_FULL * (1 - min(1.0, p / 0.3)) - 9 * math.sin(math.pi * p)
+            if p >= 0.9:
+                self._emit_once("jump_land")
+            return "happy"
+
+        if name == "eat":                        # 吃點心
+            if a < 0.62:                         # 抬頭等點心掉下來
+                self._emit_once("snack")
+                pose.sy *= 1.05
+                return "idle"
+            if a < 2.1:                          # 嚼嚼嚼，掉一點屑屑
+                c = (a - 0.62) / 0.17
+                bite = abs(math.sin(c * math.pi))
+                pose.sy *= 1 - 0.08 * bite
+                pose.sx *= 1 + 0.06 * bite
+                self._emit_once("crumb", int((a - 0.62) / 0.3))
+                return "chew" if int(c) % 2 == 0 else "blink"
+            self._emit_once("heart")             # 好吃！
+            q = (a - 2.1) / (ACTIONS["eat"] - 2.1)
+            pose.dy += -3 * 4 * q * (1 - q)
+            return "happy"
+
+        if name == "exercise":                   # 開合跳
+            if a < 2.5:
+                k = a / 0.5
+                ph = k % 1
+                if int(k) >= 2:
+                    self._emit_once("sweat", int(k))
+                if ph < 0.5:                     # 跳起來：手舉高、腳張開
+                    pose.dy += -2 - 3.5 * math.sin(math.pi * ph / 0.5)
+                    return "lifted"
+                d = math.sin(math.pi * (ph - 0.5) / 0.5)     # 落地：蹲一下
+                pose.sy *= 1 - 0.1 * d
+                pose.sx *= 1 + 0.07 * d
+                return "idle"
+            pose.sy *= 1 + 0.03 * math.sin(a * 20)           # 喘口氣
+            return "blink"
 
         return sprite

@@ -172,6 +172,8 @@ FRAMES = {
     "walk_a": lambda: frame(arm=("normal", "wave"), leg=(2, 1, 2, 1)),
     "walk_b": lambda: frame(arm=("wave", "normal"), leg=(1, 2, 1, 2)),
     "dizzy":  lambda: frame(arm="low", eye="dizzy"),
+    "stretch": lambda: frame(arm="up", eye="sleep"),   # 打哈欠伸懶腰：閉眼、手舉高
+    "chew":   lambda: frame(eye="happy"),              # 吃東西：開心地嚼
 }
 
 

@@ -23,12 +23,16 @@ DEFAULTS = {
     "effects": True,        # 落地特效（灰塵粒子、衝擊線、速度線）
     "wander": True,         # 閒著時在工作列上到處走走
     "follow_cursor": True,  # 滑鼠靠近時轉頭看
+    "chase": False,         # 跟著滑鼠走（滑鼠離得遠時，沿著工作列走過去）
+    "water_minutes": 0,     # 喝水提醒：每幾分鐘一次；0 = 關閉
+    "chime": False,         # 整點報時
     "dock": "always",       # 吸附底部：always = 放開後總是落到底部；near = 靠近時吸附；off = 關閉
 }
 CHOICES = {                 # 只能是這幾個值的欄位
     "size": {3, 4, 5, 6},
     "skin": {"crab", "custom"},
     "dock": {"always", "near", "off"},
+    "water_minutes": {0, 30, 45, 60, 90},
 }
 MAX_RECENT = 6
 

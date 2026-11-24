@@ -37,6 +37,16 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(s["fps"], DEFAULTS["fps"])
         self.assertIsNone(s["pos"])
 
+    def test_reminder_and_chase_settings(self):
+        s = Settings(NOWHERE, {"water_minutes": 45, "chime": True, "chase": True})
+        self.assertEqual(s["water_minutes"], 45)
+        self.assertTrue(s["chime"])
+        self.assertTrue(s["chase"])
+        bad = Settings(NOWHERE, {"water_minutes": 7, "chime": "yes", "chase": 1})
+        self.assertEqual(bad["water_minutes"], 0)      # 不在選項裡 → 關閉
+        self.assertFalse(bad["chime"])
+        self.assertFalse(bad["chase"])
+
     def test_not_a_dict_and_unknown_keys(self):
         s = Settings(NOWHERE, {"something_else": 1})
         self.assertNotIn("something_else", s.data)
