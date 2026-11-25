@@ -46,7 +46,8 @@ def sha256(path: Path) -> str:
     return h.hexdigest().upper()
 
 
-MAC_ARCH_LABEL = {"arm64": "Apple 晶片（M1、M2、M3、M4…）", "x86_64": "Intel 處理器"}
+MAC_ARCH_LABEL = {"arm64": "Apple 晶片（M1、M2、M3、M4…）", "x86_64": "Intel 處理器",
+                  "universal": "所有 Mac（Apple 晶片和 Intel 都能原生執行）"}
 
 
 def build_notes(version: str, setup: Path | None, run_url: str | None,
@@ -69,8 +70,9 @@ def build_notes(version: str, setup: Path | None, run_url: str | None,
             "",
         ]
     if macs:
-        parts += ["### macOS（14 Sonoma 以上）", "",
-                  "依你的 Mac 下載對應的檔案（不知道的話：左上角  →「關於這台 Mac」看「晶片」或「處理器」）：", ""]
+        parts += ["### macOS（14 Sonoma 以上）", ""]
+        if len(macs) > 1:
+            parts += ["依你的 Mac 下載對應的檔案（不知道的話：左上角  →「關於這台 Mac」看「晶片」或「處理器」）：", ""]
         for dmg in macs:
             arch = dmg.stem.rsplit("-", 1)[-1]
             parts.append(f"- **{dmg.name}**：{MAC_ARCH_LABEL.get(arch, arch)}　SHA-256 `{sha256(dmg)}`")

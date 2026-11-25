@@ -57,49 +57,44 @@ jobs:
             dist/ClawdPet-Setup-*.exe
             dist/ClawdPet-Setup-*.exe.sha256
 
+  # 在 Intel Mac 上打包「通用版」（一個 App 同時含 Apple 晶片和 Intel 的程式碼），並真的打開測試
   macos:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-latest      # Apple 晶片（macOS 26）
-            arch: arm64
-            os: macos26
-          - runner: macos-15-intel    # Intel（macOS 15）
-            arch: x86_64
-            os: macos15
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
+      - name: Install universal2 Python from python.org
+        run: |
+          curl -sSLo py.pkg https://www.python.org/ftp/python/3.13.15/python-3.13.15-macos11.pkg
+          sudo installer -pkg py.pkg -target /
+          /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 --version
 
       - name: Install Python packages
         run: |
-          python -m venv .venv
+          /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m venv .venv
           .venv/bin/python -m pip install -r requirements-dev.txt
 
       - name: Unit tests
         run: .venv/bin/python -m unittest discover -s tests -v
 
-      - name: Build ClawdPet.app and DMG
+      - name: Build universal ClawdPet.app and DMG
+        env:
+          CLAWDPET_TARGET_ARCH: universal2
         run: bash build_mac.sh
 
-      - name: Check architecture
+      - name: Check both architectures are inside
         run: |
           archs="$(lipo -archs dist/ClawdPet.app/Contents/MacOS/ClawdPet)"
           echo "built for: $archs"
-          [[ "$archs" == *"${{ matrix.arch }}"* ]]
+          [[ "$archs" == *x86_64* && "$archs" == *arm64* ]]
 
       - name: Launch the real app on this Mac
-        run: bash tools/mac_smoke_test.sh dist/ClawdPet.app "screenshot-${{ matrix.os }}-${{ matrix.arch }}.png"
+        run: bash tools/mac_smoke_test.sh dist/ClawdPet.app screenshot-build-macos15-intel.png
 
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
-          name: mac-${{ matrix.arch }}
+          name: mac-universal
           path: |
             dist/*.dmg
             dist/*.dmg.sha256
@@ -108,30 +103,32 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: screenshot-build-${{ matrix.os }}-${{ matrix.arch }}
+          name: screenshot-build-macos15-intel
           path: screenshot-*.png
           if-no-files-found: ignore
 
-  # 換另一個版本的 macOS，照使用者的方式安裝：打開 DMG → 把 App 拖進「應用程式」→ 打開
+  # 照使用者的方式安裝：打開 DMG → 把 App 拖進「應用程式」→ 打開
+  # macos-26-intel 一定要通過；Apple 晶片（macos-15）的機器常常排不到，所以失敗也不擋發布
   macos-install-test:
     needs: macos
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15          # Apple 晶片版裝到 macOS 15
-            arch: arm64
-            os: macos15
-          - runner: macos-26-intel    # Intel 版裝到 macOS 26
-            arch: x86_64
-            os: macos26
+          - runner: macos-26-intel
+            name: macos26-intel
+            optional: false
+          - runner: macos-15
+            name: macos15-applechip
+            optional: true
     runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.optional }}
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v8
         with:
-          name: mac-${{ matrix.arch }}
+          name: mac-universal
           path: dl
 
       - name: Verify checksum, open DMG, copy to /Applications
@@ -149,13 +146,13 @@ jobs:
           hdiutil detach /tmp/clawd
 
       - name: Launch the installed app
-        run: bash tools/mac_smoke_test.sh /Applications/ClawdPet.app "screenshot-${{ matrix.os }}-${{ matrix.arch }}.png"
+        run: bash tools/mac_smoke_test.sh /Applications/ClawdPet.app "screenshot-install-${{ matrix.name }}.png"
 
       - name: Upload screenshot
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: screenshot-install-${{ matrix.os }}-${{ matrix.arch }}
+          name: screenshot-install-${{ matrix.name }}
           path: screenshot-*.png
           if-no-files-found: ignore
 

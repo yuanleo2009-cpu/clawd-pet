@@ -1,6 +1,8 @@
 #!/bin/bash
 # macOS 一鍵打包：dist/ClawdPet.app + dist/ClawdPet-<版本>-mac-<架構>.dmg（附 .sha256）
 # 用法：在專案資料夾執行  ./build_mac.sh
+# 通用版（Apple 晶片 + Intel 都能原生執行）：
+#   PYTHON=<python.org 的 universal2 Python> CLAWDPET_TARGET_ARCH=universal2 ./build_mac.sh
 # GitHub Actions（.github/workflows/release.yml）也是呼叫這個腳本。
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -13,7 +15,11 @@ if [ ! -x .venv/bin/python ]; then
 fi
 
 VERSION="$(.venv/bin/python -c 'from services.version import __version__; print(__version__)')"
-ARCH="$(uname -m)"                       # arm64（Apple 晶片）或 x86_64（Intel）
+if [ "${CLAWDPET_TARGET_ARCH:-}" = "universal2" ]; then
+    ARCH="universal"                     # 一個檔案兩種 Mac 都能用
+else
+    ARCH="$(uname -m)"                   # arm64（Apple 晶片）或 x86_64（Intel）
+fi
 echo "版本：$VERSION  架構：$ARCH"
 
 # 重新產生素材

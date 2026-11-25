@@ -53,6 +53,8 @@ exe = EXE(  # noqa: F821
     upx=False,
     console=False,
     argv_emulation=False,
+    # universal2 = 一個 App 同時包含 Apple 晶片（arm64）和 Intel（x86_64）兩種程式碼
+    target_arch=os.environ.get("CLAWDPET_TARGET_ARCH") or None,
 )
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="ClawdPet")  # noqa: F821
 app = BUNDLE(  # noqa: F821
