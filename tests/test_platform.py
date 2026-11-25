@@ -36,7 +36,9 @@ class MacCommandScriptTests(unittest.TestCase):
             script = launcher.mac_command_script(str(folder), "/bin/pwd")
             script = script.replace("exec /bin/zsh -l\n", "")      # 測試時不要留在 shell 裡
             out = subprocess.run(["/bin/zsh", "-c", script], capture_output=True, text=True, timeout=20)
-            self.assertEqual(out.stdout.strip().splitlines()[-1], str(folder.resolve()))
+            last = out.stdout.strip().splitlines()[-1].split("\x07")[-1]   # 去掉設定視窗標題的控制字元
+            # macOS 的 /var 其實是 /private/var 的捷徑，兩邊都轉成真實路徑再比
+            self.assertEqual(os.path.realpath(last), os.path.realpath(folder))
 
 
 class AutostartTests(unittest.TestCase):
