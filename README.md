@@ -4,7 +4,9 @@
 
 ![Clawd 示範：揮手打招呼、橫著走、被摸摸冒愛心、被拎起來猛搖、摔下來暈頭轉向、跳舞](docs/demo.gif)
 
-**下載：**到 [Releases](../../releases/latest) 下載 `ClawdPet-Setup-*.exe`，雙擊安裝即可（Windows 10/11，64 位元）。
+**下載：**到 [Releases](../../releases/latest) 下載：
+- **Windows 10/11**：`ClawdPet-Setup-*.exe`，雙擊安裝。
+- **macOS 14 以上**：`ClawdPet-*-mac-arm64.dmg`（Apple 晶片）或 `ClawdPet-*-mac-x86_64.dmg`（Intel），打開後把 ClawdPet 拖進「應用程式」。
 
 > 非官方的粉絲作品，與 Anthropic 無關，也未獲其認可。程式碼以 [MIT 授權](LICENSE) 釋出；**授權只涵蓋程式碼**，Clawd 形象與 Claude 商標歸 Anthropic 所有，不在授權範圍內。僅供個人非商業使用。
 >
@@ -27,6 +29,17 @@
 4. 安裝完會檢查電腦裡有沒有 Claude 桌面版；沒有的話會問你要不要打開 https://claude.ai/download 。
 
 安裝後可以從「開始」功能表或 Windows 搜尋輸入 `Clawd` 開啟。
+
+## macOS
+
+1. 從 [Releases](../../releases/latest) 下載符合你 Mac 的 DMG（左上角  →「關於這台 Mac」看「晶片」：Apple M 系列選 `arm64`，Intel 選 `x86_64`）。
+2. 打開 DMG，把 **ClawdPet** 拖進「應用程式」資料夾。
+3. 第一次打開：App 沒有向 Apple 付費簽章，直接雙擊會被擋下。請對 ClawdPet 按右鍵 →「打開」→「打開」；
+   如果沒有「打開」按鈕，到「系統設定 → 隱私權與安全性」往下捲，按「強制打開」。之後就能直接打開。
+4. Clawd 會站在 Dock 上面；選單列右上角有牠的小圖示。Mac 上按右鍵可以用「control + 點一下」代替。
+
+和 Windows 版的差別：設定存在 `~/Library/Application Support/ClawdPet`；「開機自動啟動」在 Mac 上叫「登入時自動啟動」；
+終端機版 Claude Code 會用「終端機」App 打開。
 
 ## 怎麼玩
 
@@ -103,6 +116,17 @@ py -3.13 -m venv .venv
 
 - `requirements.txt`：執行需要的套件（PySide6）。
 - `requirements-dev.txt`：再加上打包用的 PyInstaller，以及產生示範動畫用的 Pillow。
+
+## 打包（macOS）
+
+需要 macOS 14 以上與 Python 3.13：
+
+```bash
+./build_mac.sh
+```
+
+會產生 `dist/ClawdPet.app` 與 `dist/ClawdPet-<版本>-mac-<arm64 或 x86_64>.dmg`（附 `.sha256`）。
+`tools/mac_smoke_test.sh dist/ClawdPet.app shot.png` 會真的打開 App 檢查一輪（GitHub Actions 也是跑這個）。
 
 ## 打包
 

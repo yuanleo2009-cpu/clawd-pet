@@ -13,7 +13,7 @@ from PySide6.QtGui import (QActionGroup, QColor, QCursor, QDesktopServices, QFon
                            QIcon, QPainter, QPen)
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon, QWidget
 
-from services import autostart, launcher, paths
+from services import autostart, launcher, osinfo, paths
 from services.reminders import Reminders
 from services.settings import Settings
 from services.version import __version__
@@ -50,7 +50,7 @@ class Flight:
 MENU_QSS = """
 QMenu {
     background: #FFFBF7; border: 2px solid #D97757; border-radius: 10px; padding: 6px;
-    font-family: "Microsoft JhengHei UI"; font-size: 10pt; color: #3A2A22;
+    font-family: "%FONT%"; font-size: %SIZE%; color: #3A2A22;
 }
 QMenu::item { padding: 6px 28px 6px 14px; border-radius: 6px; }
 QMenu::item:selected { background: #F6D3C4; }
@@ -58,6 +58,8 @@ QMenu::item:disabled { color: #A08A80; }
 QMenu::separator { height: 1px; background: #EBC8B8; margin: 4px 8px; }
 QMenu::indicator { width: 14px; height: 14px; left: 6px; }
 """
+MENU_QSS = MENU_QSS.replace("%FONT%", osinfo.UI_FONT).replace(
+    "%SIZE%", "13pt" if osinfo.IS_MAC else "10pt")
 
 
 class PetWindow(QWidget):
@@ -66,6 +68,8 @@ class PetWindow(QWidget):
                          | Qt.WindowType.Tool | Qt.WindowType.NoDropShadowWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        # macOS：「工具視窗」預設在 App 不在前景時會自動隱藏 → 要求一直顯示
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self.setWindowTitle("ClawdPet")
 
         self.settings = Settings.load()
@@ -474,7 +478,7 @@ class PetWindow(QWidget):
         for i in range(3):
             phase = (t * 0.35 + i / 3) % 1.0
             alpha = int(255 * math.sin(phase * math.pi))
-            f = QFont("Consolas")
+            f = QFont(osinfo.MONO_FONT)
             f.setBold(True)
             f.setPixelSize(max(8, round(u * (3.5 + phase * 3))))
             p.setFont(f)
@@ -702,7 +706,7 @@ class PetWindow(QWidget):
     # ================= 工作列右下角圖示 =================
     def _setup_tray(self) -> None:
         self.tray = QSystemTrayIcon(QIcon(str(paths.assets_dir() / "icon.png")), self)
-        self.tray.setToolTip("Clawd 桌寵（左鍵：顯示/隱藏，右鍵：選單）")
+        self.tray.setToolTip("Clawd 桌寵" if osinfo.IS_MAC else "Clawd 桌寵（左鍵：顯示/隱藏，右鍵：選單）")
         self._tray_menu = self._menu()
         self._tray_menu.aboutToShow.connect(lambda: self._build_menu(self._tray_menu, tray=True))
         self.tray.setContextMenu(self._tray_menu)
@@ -710,7 +714,8 @@ class PetWindow(QWidget):
         self.tray.show()
 
     def _on_tray_activated(self, reason) -> None:
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:  # 左鍵單擊
+        # macOS 的選單列圖示點一下就會打開選單（裡面有「顯示 / 隱藏」），不另外切換
+        if reason == QSystemTrayIcon.ActivationReason.Trigger and not osinfo.IS_MAC:  # 左鍵單擊
             self.set_pet_visible(not self.isVisible())
 
     def set_pet_visible(self, on: bool) -> None:
@@ -953,7 +958,7 @@ class PetWindow(QWidget):
             cur.setToolTip(current)
         proj.addAction("選擇專案資料夾…", self.choose_folder)
         if current and os.path.isdir(current):
-            proj.addAction("在檔案總管中開啟", lambda: os.startfile(current))
+            proj.addAction(f"在{osinfo.FILE_MANAGER}中開啟", lambda: osinfo.open_path(current))
         recent = [d for d in s["recent_dirs"] if os.path.isdir(d)]
         if recent:
             proj.addSeparator()
@@ -1104,11 +1109,11 @@ class PetWindow(QWidget):
         c.setChecked(bool(s["chatter"]))
         c.toggled.connect(lambda on: self._set_flag("chatter", on))
         talk.addSeparator()
-        talk.addAction("編輯台詞…", lambda: os.startfile(self.phrases.path))
+        talk.addAction("編輯台詞…", lambda: osinfo.open_path(self.phrases.path))
         menu.addMenu(talk)
 
         menu.addSeparator()
-        auto = menu.addAction("⚙  開機自動啟動")
+        auto = menu.addAction(f"⚙  {osinfo.AUTOSTART_LABEL}")
         auto.setCheckable(True)
         auto.setChecked(autostart.is_enabled())
         auto.toggled.connect(self._set_autostart)
@@ -1165,9 +1170,9 @@ class PetWindow(QWidget):
     def _set_autostart(self, on: bool) -> None:
         try:
             autostart.set_enabled(on)
-            self.say("開機後我會自己出現！" if on else "好，開機時不自動啟動", force=True)
+            self.say(osinfo.AUTOSTART_ON if on else osinfo.AUTOSTART_OFF, force=True)
         except OSError as e:
-            QMessageBox.warning(None, "ClawdPet", f"設定開機自動啟動失敗：{e}")
+            QMessageBox.warning(None, "ClawdPet", f"設定{osinfo.AUTOSTART_LABEL}失敗：{e}")
 
     def quit(self) -> None:
         self._save_position()

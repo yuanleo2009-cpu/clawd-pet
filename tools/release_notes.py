@@ -46,13 +46,17 @@ def sha256(path: Path) -> str:
     return h.hexdigest().upper()
 
 
+MAC_ARCH_LABEL = {"arm64": "Apple 晶片（M1、M2、M3、M4…）", "x86_64": "Intel 處理器"}
+
+
 def build_notes(version: str, setup: Path | None, run_url: str | None,
-                repo: str = "yuanleo2009-cpu/clawd-pet") -> str:
+                repo: str = "yuanleo2009-cpu/clawd-pet", macs: list[Path] | None = None) -> str:
     changes = changelog_section(version)
     parts = ["## 更新內容", "", changes, ""]
     name = setup.name if setup else f"ClawdPet-Setup-{version.lstrip('v')}.exe"
     parts += [
         "## 下載與安裝", "",
+        "### Windows", "",
         f"下載下面的 **{name}**，雙擊安裝即可（Windows 10/11，64 位元，不需要系統管理員權限）。",
         "",
         "安裝檔沒有數位簽章，Windows 可能顯示「Windows 已保護你的電腦」：點「其他資訊」→「仍要執行」。",
@@ -64,8 +68,21 @@ def build_notes(version: str, setup: Path | None, run_url: str | None,
             f"（PowerShell 驗證：`Get-FileHash .\\{name} -Algorithm SHA256`）",
             "",
         ]
+    if macs:
+        parts += ["### macOS（14 Sonoma 以上）", "",
+                  "依你的 Mac 下載對應的檔案（不知道的話：左上角  →「關於這台 Mac」看「晶片」或「處理器」）：", ""]
+        for dmg in macs:
+            arch = dmg.stem.rsplit("-", 1)[-1]
+            parts.append(f"- **{dmg.name}**：{MAC_ARCH_LABEL.get(arch, arch)}　SHA-256 `{sha256(dmg)}`")
+        parts += [
+            "",
+            "打開 DMG 後，把 ClawdPet 拖進「應用程式」資料夾。App 沒有向 Apple 付費簽章，第一次打開會被擋下："
+            "請對 ClawdPet 按右鍵 →「打開」→「打開」；若沒有「打開」按鈕，到「系統設定 → 隱私權與安全性」"
+            "按「強制打開」。之後就能直接打開。DMG 裡也附了「安裝說明.txt」。",
+            "",
+        ]
     if run_url:
-        parts += [f"此安裝檔由 GitHub Actions 從這個 tag 的原始碼自動打包：{run_url}", ""]
+        parts += [f"這些安裝檔由 GitHub Actions 從這個 tag 的原始碼自動打包：{run_url}", ""]
     parts += [
         f"完整的歷次更新紀錄見 [CHANGELOG.md](https://github.com/{repo}/blob/main/CHANGELOG.md)。",
         "",
@@ -81,6 +98,7 @@ def main() -> int:
     ap.add_argument("--setup", type=Path, help="安裝檔路徑（會算 SHA-256）")
     ap.add_argument("--run-url", help="GitHub Actions 打包紀錄的網址")
     ap.add_argument("--repo", default="yuanleo2009-cpu/clawd-pet", help="owner/name，用來產生連結")
+    ap.add_argument("--mac", type=Path, nargs="*", default=[], help="macOS 的 DMG 路徑（可多個）")
     ap.add_argument("--out", type=Path, help="輸出檔（UTF-8）；不給就印出來")
     args = ap.parse_args()
 
@@ -91,7 +109,7 @@ def main() -> int:
     if args.check:
         print(f"CHANGELOG.md 有 {args.version} 的更新內容 ✓")
         return 0
-    notes = build_notes(args.version, args.setup, args.run_url, args.repo)
+    notes = build_notes(args.version, args.setup, args.run_url, args.repo, sorted(args.mac))
     if args.out:
         args.out.write_text(notes, encoding="utf-8")
     else:

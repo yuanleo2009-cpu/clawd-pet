@@ -20,7 +20,8 @@ from services.version import __version__
 
 
 def _log_crash(exc_type, exc, tb) -> None:
-    """打包版沒有主控台：把未處理的錯誤寫到 %APPDATA%\\ClawdPet\\error.log。"""
+    """打包版沒有主控台：把未處理的錯誤寫到資料夾裡的 error.log
+    （Windows：%APPDATA%\\ClawdPet；macOS：~/Library/Application Support/ClawdPet）。"""
     try:
         with open(paths.data_dir() / "error.log", "a", encoding="utf-8") as f:
             f.write(f"\n===== {datetime.datetime.now():%Y-%m-%d %H:%M:%S}  v{__version__} =====\n")

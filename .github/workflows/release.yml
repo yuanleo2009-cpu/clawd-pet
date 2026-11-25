@@ -1,7 +1,10 @@
-# 推送 v* tag 時：在 GitHub 的 Windows 機器上跑測試、打包，並建立 Release（附安裝檔與 SHA-256）。
+# 推送 v* tag 時：在 GitHub 的 Windows 和 Mac 機器上跑測試、打包，並建立 Release（附安裝檔與 SHA-256）。
 # Release 說明的「更新內容」取自 CHANGELOG.md；沒寫這一版的話會在打包前就失敗。
 # 安裝檔是從公開的 commit 打包出來的，過程記錄在 Actions 頁面，任何人都能檢查。
-# 也可以在 Actions 頁面手動執行（workflow_dispatch）：只打包、上傳成 artifact，不建立 Release。
+# 也可以在 Actions 頁面手動執行（workflow_dispatch）：只測試、打包、上傳成 artifact，不建立 Release。
+#
+# macOS：在 Apple 晶片（macos-15）和 Intel（macos-15-intel）兩種 Mac 上各打包一次，
+# 並真的把 App 打開來測試；再到最新版 macOS（26）上從 DMG 安裝、打開一次。
 name: release
 
 on:
@@ -13,7 +16,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -49,22 +52,132 @@ jobs:
       - name: Upload build output
         uses: actions/upload-artifact@v7
         with:
-          name: ClawdPet-Setup
+          name: windows
           path: |
             dist/ClawdPet-Setup-*.exe
             dist/ClawdPet-Setup-*.exe.sha256
 
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15          # Apple 晶片
+            arch: arm64
+          - runner: macos-15-intel    # Intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install Python packages
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements-dev.txt
+
+      - name: Unit tests
+        run: .venv/bin/python -m unittest discover -s tests -v
+
+      - name: Build ClawdPet.app and DMG
+        run: bash build_mac.sh
+
+      - name: Check architecture
+        run: |
+          archs="$(lipo -archs dist/ClawdPet.app/Contents/MacOS/ClawdPet)"
+          echo "built for: $archs"
+          [[ "$archs" == *"${{ matrix.arch }}"* ]]
+
+      - name: Launch the real app on this Mac
+        run: bash tools/mac_smoke_test.sh dist/ClawdPet.app "screenshot-macos15-${{ matrix.arch }}.png"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: mac-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-macos15-${{ matrix.arch }}
+          path: screenshot-*.png
+          if-no-files-found: ignore
+
+  # 在最新版 macOS 上，照使用者的方式安裝：打開 DMG → 把 App 拖進「應用程式」→ 打開
+  macos-install-test:
+    needs: macos
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: mac-${{ matrix.arch }}
+          path: dl
+
+      - name: Verify checksum, open DMG, copy to /Applications
+        run: |
+          cd dl
+          dmg="$(ls *.dmg)"
+          want="$(cut -d' ' -f1 "$dmg.sha256")"
+          got="$(shasum -a 256 "$dmg" | awk '{print toupper($1)}')"
+          [ "$want" = "$got" ] || { echo "checksum mismatch"; exit 1; }
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/clawd "$dmg"
+          ls -la /tmp/clawd
+          test -f "/tmp/clawd/安裝說明.txt"
+          test -L "/tmp/clawd/應用程式"
+          cp -R /tmp/clawd/ClawdPet.app /Applications/
+          hdiutil detach /tmp/clawd
+
+      - name: Launch the installed app
+        run: bash tools/mac_smoke_test.sh /Applications/ClawdPet.app "screenshot-macos26-${{ matrix.arch }}.png"
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-macos26-${{ matrix.arch }}
+          path: screenshot-*.png
+          if-no-files-found: ignore
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [windows, macos, macos-install-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dl
+          pattern: "{windows,mac-*}"
+          merge-multiple: true
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
           PYTHONIOENCODING: utf-8
         run: |
-          # Release 說明 = CHANGELOG.md 裡這一版的「更新內容」+ 安裝說明 + SHA-256 + 打包紀錄連結
-          $setup = Get-Item dist\ClawdPet-Setup-*.exe
-          $run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
-          .\.venv\Scripts\python.exe tools\release_notes.py $env:GITHUB_REF_NAME `
-            --setup $setup.FullName --run-url $run --repo $env:GITHUB_REPOSITORY --out release-notes.md
-          if ($LASTEXITCODE -ne 0) { throw "failed to build release notes" }
-          gh release create $env:GITHUB_REF_NAME $setup.FullName "$($setup.FullName).sha256" `
-            --title "Clawd 桌寵 $env:GITHUB_REF_NAME" --notes-file release-notes.md
+          # Release 說明 = CHANGELOG.md 裡這一版的「更新內容」+ 各平台安裝說明 + SHA-256 + 打包紀錄連結
+          ls -la dl
+          setup="$(ls dl/ClawdPet-Setup-*.exe)"
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          python3 tools/release_notes.py "$GITHUB_REF_NAME" --setup "$setup" --mac dl/*.dmg \
+            --run-url "$run" --repo "$GITHUB_REPOSITORY" --out release-notes.md
+          gh release create "$GITHUB_REF_NAME" dl/ClawdPet-Setup-*.exe dl/ClawdPet-Setup-*.exe.sha256 \
+            dl/*.dmg dl/*.dmg.sha256 --title "Clawd 桌寵 $GITHUB_REF_NAME" --notes-file release-notes.md

@@ -4,6 +4,21 @@
 
 格式：最新的版本在最上面；每個版本用 `## [版本] - 日期` 開頭。
 
+## [1.4.0] - 2026-11-25
+
+### 新功能
+- **macOS 版**：Clawd 現在也能在 Mac 上用了（macOS 14 Sonoma 以上）。Apple 晶片和 Intel 的 Mac 各有一個 DMG。
+  - 所有動畫、互動、提醒都和 Windows 版一樣；Clawd 會站在 Dock 上面。
+  - 不會在 Dock 佔一個圖示，選單列右上角有 Clawd 的小圖示（點它打開選單）。
+  - 雙擊打開 Mac 版的 Claude 桌面版；「進階：終端機版 Claude Code」會用「終端機」App 打開。
+  - 「登入時自動啟動」：登入 Mac 後自動出現。
+  - 設定與台詞存在 `~/Library/Application Support/ClawdPet`。
+
+### 其他
+- GitHub 自動打包時，會在 Apple 晶片和 Intel 的 Mac 上各打包一次，並真的把 App 打開來測試；
+  再到最新版 macOS 上從 DMG 安裝、打開一次，全部通過才會發布。
+- 新增 Windows / macOS 都會跑的整合測試（主視窗、選單、丟出去落地、動畫不被切到、餵食、滾輪），以及 macOS 專用測試，共 49 項。
+
 ## [1.3.1] - 2026-11-24
 
 ### 改進

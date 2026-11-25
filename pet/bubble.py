@@ -5,6 +5,8 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget
 
+from services import osinfo
+
 PAD_X, PAD_Y, TAIL, RADIUS, MAX_W = 12, 8, 9, 10, 220
 BORDER = QColor("#D97757")
 FILL = QColor("#FFFBF7")
@@ -18,9 +20,10 @@ class Bubble(QWidget):
                          | Qt.WindowType.WindowTransparentForInput)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)  # macOS：不在前景也顯示
         self._text = ""
         self._tail_x = 0.0
-        self._font = QFont("Microsoft JhengHei UI", 10)
+        self._font = QFont(osinfo.UI_FONT, 13 if osinfo.IS_MAC else 10)
         self._font.setBold(True)
         self._timer = QTimer(self, singleShot=True)
         self._timer.timeout.connect(self.hide)

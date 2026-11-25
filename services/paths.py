@@ -30,9 +30,15 @@ def app_dir() -> Path:
 
 
 def data_dir() -> Path:
-    """使用者資料（設定、台詞）：%APPDATA%\\ClawdPet"""
-    base = os.environ.get("APPDATA") or str(Path.home())
-    d = Path(base) / "ClawdPet"
+    """使用者資料（設定、台詞、錯誤紀錄）：
+    Windows：%APPDATA%\\ClawdPet
+    macOS：~/Library/Application Support/ClawdPet
+    """
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("APPDATA") or str(Path.home()))
+    d = base / "ClawdPet"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
