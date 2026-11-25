@@ -3,8 +3,8 @@
 # 安裝檔是從公開的 commit 打包出來的，過程記錄在 Actions 頁面，任何人都能檢查。
 # 也可以在 Actions 頁面手動執行（workflow_dispatch）：只測試、打包、上傳成 artifact，不建立 Release。
 #
-# macOS：在 Apple 晶片（macos-15）和 Intel（macos-15-intel）兩種 Mac 上各打包一次，
-# 並真的把 App 打開來測試；再到最新版 macOS（26）上從 DMG 安裝、打開一次。
+# macOS：在 Apple 晶片和 Intel 兩種 Mac 上各打包一次，並真的把 App 打開來測試；
+# 再換另一個版本的 macOS（15 / 26）從 DMG 安裝、打開一次。
 name: release
 
 on:
@@ -62,10 +62,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15          # Apple 晶片
+          - runner: macos-latest      # Apple 晶片（macOS 26）
             arch: arm64
-          - runner: macos-15-intel    # Intel
+            os: macos26
+          - runner: macos-15-intel    # Intel（macOS 15）
             arch: x86_64
+            os: macos15
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -92,7 +94,7 @@ jobs:
           [[ "$archs" == *"${{ matrix.arch }}"* ]]
 
       - name: Launch the real app on this Mac
-        run: bash tools/mac_smoke_test.sh dist/ClawdPet.app "screenshot-macos15-${{ matrix.arch }}.png"
+        run: bash tools/mac_smoke_test.sh dist/ClawdPet.app "screenshot-${{ matrix.os }}-${{ matrix.arch }}.png"
 
       - name: Upload DMG
         uses: actions/upload-artifact@v7
@@ -106,21 +108,23 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: screenshot-macos15-${{ matrix.arch }}
+          name: screenshot-build-${{ matrix.os }}-${{ matrix.arch }}
           path: screenshot-*.png
           if-no-files-found: ignore
 
-  # 在最新版 macOS 上，照使用者的方式安裝：打開 DMG → 把 App 拖進「應用程式」→ 打開
+  # 換另一個版本的 macOS，照使用者的方式安裝：打開 DMG → 把 App 拖進「應用程式」→ 打開
   macos-install-test:
     needs: macos
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-26
+          - runner: macos-15          # Apple 晶片版裝到 macOS 15
             arch: arm64
-          - runner: macos-26-intel
+            os: macos15
+          - runner: macos-26-intel    # Intel 版裝到 macOS 26
             arch: x86_64
+            os: macos26
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -145,13 +149,13 @@ jobs:
           hdiutil detach /tmp/clawd
 
       - name: Launch the installed app
-        run: bash tools/mac_smoke_test.sh /Applications/ClawdPet.app "screenshot-macos26-${{ matrix.arch }}.png"
+        run: bash tools/mac_smoke_test.sh /Applications/ClawdPet.app "screenshot-${{ matrix.os }}-${{ matrix.arch }}.png"
 
       - name: Upload screenshot
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: screenshot-macos26-${{ matrix.arch }}
+          name: screenshot-install-${{ matrix.os }}-${{ matrix.arch }}
           path: screenshot-*.png
           if-no-files-found: ignore
 
